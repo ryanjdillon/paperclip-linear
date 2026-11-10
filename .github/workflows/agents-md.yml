@@ -1,0 +1,18 @@
+name: agents-md
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-instructions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ryanjdillon/workflows/check-instructions@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
