@@ -22,7 +22,7 @@ export function config(mode: LinearConfig["mode"] = "act", extra: Partial<Linear
 }
 
 /** A fake Linear: mints tokens, answers the issue query, records every write. */
-export function fakeLinear(issue: { labels: string[]; projectId: string | null }) {
+export function fakeLinear(issue: { labels: string[]; projectId: string | null; stateType?: string }) {
   const activities: Array<{ type: string; body: string }> = [];
   const urls: Array<{ label: string; url: string }> = [];
   const stateMoves: Array<{ id: string; stateId: string }> = [];
@@ -51,6 +51,7 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null }
       stateMoves.push({ id: variables.id!, stateId: variables.input!.stateId! });
       return ok({ issueUpdate: { success: true } });
     }
+    if (query.includes("IssueState")) return ok({ issue: { state: { type: issue.stateType ?? "started" } } });
     return ok({
       issue: {
         id: "lin-issue-1",
@@ -64,6 +65,7 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null }
     });
   };
   return {
+    issue,
     fetch,
     activities,
     urls,

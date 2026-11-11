@@ -2,6 +2,7 @@ import { definePlugin, runWorker, type PluginContext, type PluginWebhookInput } 
 import { parseConfig, type LinearConfig } from "./config.js";
 import { handleAgentSessionEvent, type AgentSessionPayload } from "./intake.js";
 import { AppTokenSource, LinearApi, type Fetch } from "./linear/api.js";
+import { COMPANIES_KEY, RECONCILE_JOB, reconcileCompany } from "./reconcile.js";
 import { handleStatusEvent, STATUS_EVENTS } from "./status.js";
 import { checkDelivery, firstDelivery } from "./linear/webhook.js";
 
@@ -87,10 +88,29 @@ export async function handleLinearWebhook(
   return "accepted";
 }
 
+/** Reconcile every configured company; one company's failure does not stop the others. */
+export async function runReconcile(context: PluginContext, now: number, fetch: Fetch): Promise<void> {
+  const companies = ((await context.state.get(COMPANIES_KEY)) as string[] | null) ?? [];
+  for (const companyId of companies) {
+    try {
+      const parsed = parseConfig(await context.config.get(companyId));
+      if ("problems" in parsed) continue;
+      const linear = await linearFor(context, companyId, parsed.config, fetch);
+      const report = await reconcileCompany(context, linear, companyId, parsed.config, now);
+      context.logger.info("Reconciled with Linear", { companyId, mode: parsed.config.mode, ...report });
+    } catch (error) {
+      context.logger.error("Reconcile failed for a company", { companyId, error: String(error) });
+    }
+  }
+}
+
 const plugin = definePlugin({
   async setup(context) {
     ctx = context;
     context.data.register("health", async () => ({ status: "ok", checkedAt: new Date().toISOString() }));
+    context.jobs.register(RECONCILE_JOB, async () => {
+      await runReconcile(context, Date.now(), hostFetch(context));
+    });
     for (const eventType of STATUS_EVENTS) {
       context.events.on(eventType, async (event) => {
         try {
@@ -115,6 +135,8 @@ const plugin = definePlugin({
     const parsed = parseConfig(newConfig);
     if ("config" in parsed) {
       await ctx.state.set(organizationKey(parsed.config.linearOrganizationId), change.companyId);
+      const companies = ((await ctx.state.get(COMPANIES_KEY)) as string[] | null) ?? [];
+      if (!companies.includes(change.companyId)) await ctx.state.set(COMPANIES_KEY, [...companies, change.companyId]);
     }
   },
 

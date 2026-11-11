@@ -2,6 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
 import type { LinearApi } from "./linear/api.js";
 import { route } from "./routing.js";
+import { lastActivityKey } from "./status.js";
 
 export const ORIGIN_KIND = "plugin:ryanjdillon.paperclip-linear" as const;
 
@@ -140,6 +141,7 @@ async function routeSession(
     idempotencyKey: `linear-session:${sessionId}`,
   });
   await linear.postActivity(sessionId, "thought", `Queued in Paperclip for the ${decision.name} lead.`);
+  await ctx.state.set(lastActivityKey(sessionId), Date.now());
   return "routed";
 }
 

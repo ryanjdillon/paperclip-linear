@@ -17,12 +17,23 @@ const manifest: PaperclipPluginManifestV1 = {
     "issues.wakeup",
     "issue.comments.create",
     "issue.comments.read",
+    "issues.read",
+    "issues.update",
+    "jobs.schedule",
     "plugin.state.read",
     "plugin.state.write",
     "events.subscribe",
     "ui.dashboardWidget.register",
   ],
   instanceConfigSchema: configSchema as unknown as PaperclipPluginManifestV1["instanceConfigSchema"],
+  jobs: [
+    {
+      jobKey: "reconcile",
+      displayName: "Reconcile with Linear",
+      description: "Replays missed reports, cancels tasks whose Linear issue was canceled, keeps sessions alive",
+      schedule: "*/5 * * * *",
+    },
+  ],
   webhooks: [
     {
       endpointKey: "linear",

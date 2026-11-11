@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import manifest from "../src/manifest.js";
+import { COMPANIES_KEY } from "../src/reconcile.js";
 import plugin, { handleLinearWebhook, organizationKey } from "../src/worker.js";
 
 const companyId = "company-1";
@@ -37,7 +38,8 @@ function delivery(body: Record<string, unknown>, id = "d-1", secret = harnessSec
 describe("manifest", () => {
   it("declares the Linear webhook and the capabilities it needs", () => {
     expect(manifest.webhooks?.map((w) => w.endpointKey)).toEqual(["linear"]);
-    for (const capability of ["webhooks.receive", "secrets.read-ref", "plugin.state.read", "plugin.state.write"]) {
+    expect(manifest.jobs?.map((j) => [j.jobKey, j.schedule])).toEqual([["reconcile", "*/5 * * * *"]]);
+    for (const capability of ["webhooks.receive", "secrets.read-ref", "plugin.state.read", "plugin.state.write", "jobs.schedule"]) {
       expect(manifest.capabilities).toContain(capability);
     }
   });
@@ -52,8 +54,9 @@ describe("Linear webhook handling", () => {
     await plugin.definition.onConfigChanged?.(config, { companyId });
   });
 
-  it("maps the configured Linear workspace to its company", () => {
+  it("maps the configured Linear workspace to its company and registers the company for reconcile", () => {
     expect(harness.getState(organizationKey(orgId))).toBe(companyId);
+    expect(harness.getState(COMPANIES_KEY)).toEqual([companyId]);
   });
 
   it("accepts a signed delivery once and drops the retry", async () => {

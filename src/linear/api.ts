@@ -98,6 +98,15 @@ export class LinearApi {
     );
   }
 
+  /** The issue's workflow state type: triage, backlog, unstarted, started, completed, or canceled. */
+  async issueStateType(id: string): Promise<string | null> {
+    const data = await this.graphql<{ issue: { state?: { type?: string } | null } | null }>(
+      `query IssueState($id: String!) { issue(id: $id) { state { type } } }`,
+      { id },
+    );
+    return data.issue?.state?.type ?? null;
+  }
+
   /** Move an issue to a workflow state. */
   async setIssueState(issueId: string, stateId: string): Promise<void> {
     await this.graphql(

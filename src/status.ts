@@ -26,8 +26,13 @@ export interface StatusDeps {
 const PR_URL = /https:\/\/(?:github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+|gitlab\.com\/[\w./-]+\/-\/merge_requests\/\d+)/g;
 
 /** Outbound write keys, recorded before the call so a repeat never writes twice. */
-function outboundKey(key: string) {
+export function outboundKey(key: string) {
   return { scopeKind: "instance", stateKey: `linear-outbound:${key}` } as const;
+}
+
+/** When the plugin last posted to a session; the reconcile job keeps quiet sessions alive. */
+export function lastActivityKey(agentSessionId: string) {
+  return { scopeKind: "instance", stateKey: `linear-last-activity:${agentSessionId}` } as const;
 }
 
 /**
@@ -54,17 +59,24 @@ export async function handleStatusEvent(deps: StatusDeps, event: PluginEvent): P
     ctx.logger.info("Observe mode: would report to Linear", { sessionId, event: event.eventType, kind: plan.kind });
     return "observed";
   }
-  const key = outboundKey(`${event.eventId}:${plan.kind}`);
+  const key = outboundKey(plan.key ?? `${event.eventId}:${plan.kind}`);
   if ((await ctx.state.get(key)) !== null) return "duplicate";
   await ctx.state.set(key, { at: event.occurredAt, sessionId });
   await plan.run(sessionId);
+  await ctx.state.set(lastActivityKey(sessionId), Date.parse(event.occurredAt) || Date.now());
   return "reported";
 }
 
 interface Plan {
   kind: string;
+  /** A stable key the reconcile job can check; defaults to the event id and kind. */
+  key?: string;
   run(sessionId: string): Promise<void>;
 }
+
+/** Outbound keys for writes the reconcile job may need to replay. */
+export const commentOutbound = (commentId: string) => `comment:${commentId}`;
+export const doneOutbound = (taskId: string) => `done:${taskId}`;
 
 async function planFor(
   deps: StatusDeps,
@@ -102,6 +114,7 @@ async function planFor(
       const urls = [...new Set(comment.body.match(PR_URL) ?? [])];
       return {
         kind: "comment",
+        key: commentOutbound(comment.id),
         run: async (sessionId) => {
           await linear.postActivity(sessionId, "response", comment.body);
           if (urls.length > 0) await linear.addExternalUrls(sessionId, urls.map((url) => ({ label: "Pull request", url })));
@@ -122,6 +135,7 @@ async function planFor(
       if (status === "done") {
         return {
           kind: "done",
+          key: doneOutbound(taskId),
           run: async (sessionId) => {
             await linear.postActivity(sessionId, "response", "Finished in Paperclip.");
             if (config.closeOnDone && config.states.done) await linear.setIssueState(link.linearIssueId, config.states.done);

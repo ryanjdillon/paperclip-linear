@@ -40,7 +40,11 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 - **Event handlers.** Turn Paperclip events into Linear activities and state
   moves (table in [user docs](../user/index.md#what-shows-up-in-linear)).
 - **Reconcile job.** Plugin events arrive at most once, so every 5 minutes the
-  job compares open links with both sides and replays what was missed.
+  job walks each configured company's linked tasks (found by origin, since
+  jobs carry no company and plugin state cannot be listed). It cancels tasks
+  whose Linear issue was canceled, replays agent comments and completions with
+  no outbound record, and posts a keep-alive thought when a task in progress
+  has been quiet for 20 minutes.
 - **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
   authenticated with a client-credentials token of the same Linear app, so
   their writes also appear as the app (ADR 0007). A scheduled job rotates the
@@ -70,7 +74,8 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 
 ## Modes
 
-Per Linear project, `observe` (log what it would do) then `act`.
+Per company configuration, `observe` (log what it would do, write nothing to
+either side) then `act`. Per-project modes are a possible later refinement.
 
 ## Accountability
 
