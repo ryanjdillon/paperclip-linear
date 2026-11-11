@@ -1,0 +1,22 @@
+name: image
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: ["Dockerfile", ".dockerignore", "package.json", "pnpm-lock.yaml", ".github/workflows/image.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+    with:
+      image: ryanjdillon/paperclip-linear
+      platforms: linux/amd64,linux/arm64
+      # Pull requests only check that the image builds.
+      push: ${{ github.event_name == 'push' }}

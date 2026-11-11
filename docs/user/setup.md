@@ -17,7 +17,21 @@ secret store.
 
 ## Paperclip
 
-Install the plugin, then set its configuration for the company:
+Run the image `ghcr.io/ryanjdillon/paperclip-linear`, pinned by digest. It is
+the official Paperclip image with the plugin at
+`/opt/paperclip-plugins/paperclip-linear`. Paperclip's automatic install
+covers only its own bundled plugins, so register this one once from that
+path; the registration persists, and later images replace the code at the
+same path, loaded on restart:
+
+```bash
+paperclipai plugin install /opt/paperclip-plugins/paperclip-linear
+```
+
+(Unverified: whether the CLI must run inside the container or can point at
+the server from outside; the path must be readable by the server.)
+
+Then set its configuration for the company:
 
 | Field | Meaning |
 | --- | --- |
