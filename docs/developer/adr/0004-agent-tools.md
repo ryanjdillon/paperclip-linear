@@ -1,6 +1,6 @@
 # 0004. Agents write to Linear through plugin tools as the app
 
-- Status: Accepted
+- Status: Superseded by [0007](0007-builtin-connection-app-token.md)
 - Date: 2026-11-10
 
 ## Context

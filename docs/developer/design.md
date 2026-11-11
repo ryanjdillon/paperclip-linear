@@ -35,8 +35,10 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   moves (table in [user docs](../user/index.md#what-shows-up-in-linear)).
 - **Reconcile job.** Plugin events arrive at most once, so every 5 minutes the
   job compares open links with both sides and replays what was missed.
-- **Agent tools.** Plugin-registered tools let agents create, update, and
-  comment on Linear issues as the app, limited to configured projects.
+- **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
+  authenticated with a client-credentials token of the same Linear app, so
+  their writes also appear as the app (ADR 0007). A scheduled job rotates the
+  token before its 30 days run out.
 
 ## Data (plugin database namespace)
 
@@ -53,9 +55,9 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 - Every write to Linear has a key `<paperclip event or run id>:<kind>`, stored
   in `outbound` before the call; comments carry a hidden `<!-- pc:<key> -->`
   marker.
-- Inbound events are dropped when their actor is the app, their body carries a
-  `pc:` marker, or their entity was written by the plugin in the last few
-  minutes.
+- Inbound events are dropped when their body carries a `pc:` marker or their
+  entity and change match a row in `outbound`. Never by actor: agents write as
+  the same Linear app, and their work must come through.
 - Paperclip writes made by the plugin have `actorType: plugin`, and the event
   handlers ignore them.
 - Every wakeup passes an idempotency key.
