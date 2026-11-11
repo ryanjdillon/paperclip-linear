@@ -2,7 +2,8 @@
 
 A Paperclip plugin that makes Linear the source of truth for work Paperclip's
 agents do: intake from Linear agent sessions, status back as agent activity,
-and Linear tools for agents. Design stage; no code yet.
+and Linear tools for agents. Scaffolded with Paperclip's `plugin init`
+(connector template); the feature code is still to come.
 
 ## Linear
 
@@ -12,15 +13,20 @@ and Linear tools for agents. Design stage; no code yet.
 
 ## Tech stack
 
-- TypeScript Paperclip plugin, scaffolded with the Paperclip CLI
-  (`plugin init`), built with pnpm; `@paperclipai/plugin-sdk` pinned to an
-  exact version
+- TypeScript Paperclip plugin built with esbuild, tested with vitest; pnpm
+  (version in `package.json` `packageManager`)
+- `@paperclipai/plugin-sdk` and `@paperclipai/shared` pinned to the exact
+  Paperclip release under test; upgrade both with the Paperclip instance
+- Dependency install scripts are off (`pnpm-workspace.yaml` `allowBuilds`)
 - Linear GraphQL API and webhooks, as an OAuth app installed with `actor=app`
 
 ## Common commands
 
 ```bash
-just check    # docs index and link check
+nix develop                      # node 24, pnpm, just, prek, python3
+pnpm install --frozen-lockfile
+just check                       # docs, typecheck, tests, pnpm audit (CI runs this)
+pnpm dev                         # watch build into dist/
 ```
 
 ## Architecture

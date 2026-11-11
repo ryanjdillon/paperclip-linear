@@ -15,7 +15,25 @@ done. Nothing created only in Paperclip is pushed into Linear.
 
 ## Status
 
-Design. No code yet. See [docs/index.md](docs/index.md).
+Scaffold. The design is in [docs/index.md](docs/index.md).
+
+## Development
+
+Requires Node 24.11+ and pnpm (`nix develop` provides both, plus `just`).
+
+```bash
+pnpm install --frozen-lockfile
+just check      # docs, typecheck, tests, dependency audit (CI runs this)
+pnpm dev        # rebuild dist/ on change
+```
+
+To try it, run Paperclip from a source checkout and install this folder from
+its absolute path: `pnpm paperclipai plugin install /path/to/paperclip-linear`
+in the Paperclip checkout. Local installs run trusted code from this folder.
+
+`@paperclipai/plugin-sdk` and `@paperclipai/shared` are pinned to the exact
+Paperclip release the plugin is tested against; upgrade them together with the
+Paperclip instance.
 
 ## License
 

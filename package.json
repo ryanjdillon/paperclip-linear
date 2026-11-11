@@ -1,0 +1,39 @@
+{
+  "name": "@ryanjdillon/paperclip-linear",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Makes Linear the source of truth for work Paperclip agents do",
+  "license": "MIT",
+  "author": "ryanjdillon",
+  "repository": "github:ryanjdillon/paperclip-linear",
+  "packageManager": "pnpm@12.9.0",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "build": "node ./esbuild.config.mjs",
+    "dev": "node ./esbuild.config.mjs --watch",
+    "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4177",
+    "test": "vitest run --config ./vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "keywords": ["paperclip", "plugin", "connector", "linear"],
+  "devDependencies": {
+    "@paperclipai/plugin-sdk": "2026.1106.0",
+    "@paperclipai/shared": "2026.1106.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.8",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.3",
+    "vitest": "^5.1.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}

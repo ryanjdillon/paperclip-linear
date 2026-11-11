@@ -1,0 +1,15 @@
+name: nix
+
+on:
+  pull_request:
+    paths: ["**.nix", "flake.lock"]
+  push:
+    branches: [main]
+    paths: ["**.nix", "flake.lock"]
+
+permissions:
+  contents: read
+
+jobs:
+  nix:
+    uses: ryanjdillon/workflows/.github/workflows/nix-check.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
