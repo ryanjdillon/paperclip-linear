@@ -13,6 +13,10 @@ export interface LinearConfig {
   linearOrganizationId: string;
   /** The Linear app's webhook signing secret. */
   webhookSecret: SecretRef;
+  /** The Linear OAuth app's client id; with the secret it mints app tokens. */
+  linearClientId: string;
+  /** The Linear OAuth app's client secret. */
+  linearClientSecret: SecretRef;
   /** `observe` logs what the plugin would do; `act` does it (ADR 0006). */
   mode: "observe" | "act";
   routing: RoutingConfig;
@@ -21,10 +25,12 @@ export interface LinearConfig {
 /** JSON Schema shown to the operator in Paperclip's plugin settings. */
 export const configSchema = {
   type: "object",
-  required: ["linearOrganizationId", "webhookSecret"],
+  required: ["linearOrganizationId", "webhookSecret", "linearClientId", "linearClientSecret"],
   properties: {
     linearOrganizationId: { type: "string", title: "Linear workspace id" },
     webhookSecret: { type: "object", title: "Linear webhook signing secret", format: "secret-ref" },
+    linearClientId: { type: "string", title: "Linear OAuth app client id" },
+    linearClientSecret: { type: "object", title: "Linear OAuth app client secret", format: "secret-ref" },
     mode: { type: "string", enum: ["observe", "act"], default: "observe", title: "Mode" },
     routing: {
       type: "object",
@@ -58,6 +64,12 @@ export function parseConfig(raw: Record<string, unknown>): { config: LinearConfi
   if (!secret || secret.type !== "secret_ref" || typeof secret.secretId !== "string") {
     problems.push("webhookSecret must be a secret reference");
   }
+  const clientId = raw.linearClientId;
+  if (typeof clientId !== "string" || clientId.trim() === "") problems.push("linearClientId is required");
+  const clientSecret = raw.linearClientSecret as Partial<SecretRef> | undefined;
+  if (!clientSecret || clientSecret.type !== "secret_ref" || typeof clientSecret.secretId !== "string") {
+    problems.push("linearClientSecret must be a secret reference");
+  }
   const mode = raw.mode ?? "observe";
   if (mode !== "observe" && mode !== "act") problems.push("mode must be observe or act");
   const routing = (raw.routing ?? {}) as Partial<RoutingConfig>;
@@ -77,6 +89,8 @@ export function parseConfig(raw: Record<string, unknown>): { config: LinearConfi
     config: {
       linearOrganizationId: (org as string).trim(),
       webhookSecret: secret as SecretRef,
+      linearClientId: (clientId as string).trim(),
+      linearClientSecret: clientSecret as SecretRef,
       mode: mode as LinearConfig["mode"],
       routing: { leads, projects },
     },

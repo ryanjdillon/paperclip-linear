@@ -10,6 +10,8 @@ const secretRef = { type: "secret_ref", secretId: "secret-1" } as const;
 const config = {
   linearOrganizationId: orgId,
   webhookSecret: secretRef,
+  linearClientId: "client-1",
+  linearClientSecret: { type: "secret_ref", secretId: "secret-2" },
   mode: "observe",
   routing: { leads: { delivery: { paperclipProjectId: "p1", agentId: "a1" } }, projects: { "lin-p1": "delivery" } },
 };
@@ -81,7 +83,13 @@ describe("config validation", () => {
     const result = await plugin.definition.onValidateConfig?.({ routing: { leads: {}, projects: { x: "nobody" } } });
     expect(result?.ok).toBe(false);
     expect(result?.errors).toEqual(
-      expect.arrayContaining(["linearOrganizationId is required", "webhookSecret must be a secret reference", "project x routes to unknown lead nobody"]),
+      expect.arrayContaining([
+        "linearOrganizationId is required",
+        "webhookSecret must be a secret reference",
+        "linearClientId is required",
+        "linearClientSecret must be a secret reference",
+        "project x routes to unknown lead nobody",
+      ]),
     );
   });
 });
