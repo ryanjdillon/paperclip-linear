@@ -49,3 +49,41 @@ Then set its configuration for the company:
 Saving the configuration records which company the Linear workspace belongs
 to. A delivery whose signature does not match, that is more than a minute
 old, or that repeats an earlier delivery id is dropped without retry.
+
+## Agents in Linear
+
+Agents create and update Linear issues through Paperclip's built-in Linear
+connection, authenticated as the same Linear app (ADR 0007):
+
+1. Mint a client-credentials token (the OAuth app must allow client
+   credentials):
+   `POST https://api.linear.app/oauth/token` with
+   `grant_type=client_credentials` and
+   `scope=read,write,app:assignable,app:mentionable`, authenticated with the
+   client id and secret.
+2. In Paperclip, add the Linear connection with the **API key** method and
+   paste the token. Note the id of the secret it is stored in.
+3. Bind the agents that need Linear to a tool profile; start Linear writes at
+   "require approval" and allow them per agent once trusted.
+
+The token lasts 30 days and cannot be refreshed, so a scheduled job replaces
+it. The image includes the job's script:
+
+```bash
+node /opt/paperclip-plugins/paperclip-linear/dist/rotate.js
+```
+
+Run it weekly (a Kubernetes CronJob with the same image works) with:
+
+| Variable | Value |
+| --- | --- |
+| `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET` | The OAuth app's credentials |
+| `PAPERCLIP_URL` | Paperclip's base URL; the in-cluster service address is fine |
+| `PAPERCLIP_API_KEY` | A board API key created for this job |
+| `PAPERCLIP_SECRET_ID` | The secret behind the Linear connection's key |
+
+A board API key acts as the user who created it, with that user's full board
+rights; Paperclip has no narrower scope. Create a dedicated, named key with an
+explicit expiry (`POST /api/board-api-keys` with `name` and `expiresAt`, for
+example a year out; the default is 30 days), keep it only in the job's secret,
+and renew it before it expires.
