@@ -12,6 +12,10 @@ const manifest: PaperclipPluginManifestV1 = {
   capabilities: [
     "webhooks.receive",
     "secrets.read-ref",
+    "http.outbound",
+    "issues.create",
+    "issues.wakeup",
+    "issue.comments.create",
     "plugin.state.read",
     "plugin.state.write",
     "events.subscribe",

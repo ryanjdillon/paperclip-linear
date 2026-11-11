@@ -1,5 +1,7 @@
 import { definePlugin, runWorker, type PluginContext, type PluginWebhookInput } from "@paperclipai/plugin-sdk";
-import { parseConfig } from "./config.js";
+import { parseConfig, type LinearConfig } from "./config.js";
+import { handleAgentSessionEvent, type AgentSessionPayload } from "./intake.js";
+import { AppTokenSource, LinearApi, type Fetch } from "./linear/api.js";
 import { checkDelivery, firstDelivery } from "./linear/webhook.js";
 
 /** Instance state key mapping a Linear workspace to the Paperclip company configured for it. */
@@ -18,6 +20,25 @@ export type WebhookOutcome =
 
 let ctx: PluginContext | undefined;
 
+/** One app token source per company and client id, so tokens survive between deliveries. */
+const tokenSources = new Map<string, AppTokenSource>();
+
+async function linearFor(context: PluginContext, companyId: string, config: LinearConfig, fetch: Fetch): Promise<LinearApi> {
+  const key = `${companyId}:${config.linearClientId}`;
+  let tokens = tokenSources.get(key);
+  if (!tokens) {
+    const secret = await context.secrets.resolve(config.linearClientSecret);
+    tokens = new AppTokenSource(fetch, config.linearClientId, secret);
+    tokenSources.set(key, tokens);
+  }
+  return new LinearApi(fetch, tokens);
+}
+
+/** Route outbound calls through the host so they are traced and capability-checked. */
+function hostFetch(context: PluginContext): Fetch {
+  return (url, init) => context.http.fetch(url, init);
+}
+
 /**
  * Handle one Linear delivery. Webhooks carry no Paperclip company, so the
  * Linear workspace id in the payload selects the company. Never throws for a
@@ -27,6 +48,7 @@ export async function handleLinearWebhook(
   context: PluginContext,
   input: PluginWebhookInput,
   now = Date.now(),
+  fetch: Fetch = hostFetch(context),
 ): Promise<WebhookOutcome> {
   if (input.endpointKey !== "linear") return "ignored_endpoint";
   const organizationId = (input.parsedBody as { organizationId?: unknown } | undefined)?.organizationId;
@@ -49,6 +71,18 @@ export async function handleLinearWebhook(
   }
   if (!(await firstDelivery(context.state, check.deliveryId, now))) return "duplicate";
   context.logger.info("Accepted a Linear delivery", { companyId, deliveryId: check.deliveryId, mode: parsed.config.mode });
+  const body = input.parsedBody as AgentSessionPayload | undefined;
+  if (body?.type === "AgentSessionEvent") {
+    try {
+      const linear = await linearFor(context, companyId, parsed.config, fetch);
+      const outcome = await handleAgentSessionEvent({ ctx: context, linear, companyId, config: parsed.config }, body);
+      context.logger.info("Handled a Linear agent session event", { companyId, outcome });
+    } catch (error) {
+      // The delivery id is already recorded, so a Linear retry would be dropped;
+      // the reconcile job (DIL-868) picks up sessions left unhandled.
+      context.logger.error("Failed to handle a Linear agent session event", { companyId, error: String(error) });
+    }
+  }
   return "accepted";
 }
 

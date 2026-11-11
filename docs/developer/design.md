@@ -26,11 +26,17 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 
 - **Linear identity.** One OAuth app installed with `actor=app`, scopes
   `read write app:assignable app:mentionable`, webhook categories agent
-  session events, issues, and comments. Every write appears as the app.
-- **Webhook handler.** Verifies the signature and timestamp, records the
-  `Linear-Delivery` id to drop duplicates, does the minimum, and defers slow
-  reads to a job. Linear expects an answer within 5 seconds and a first
-  activity within 10.
+  session events, issues, and comments. Every write appears as the app. The
+  plugin mints its own client-credentials token from the app's client id and
+  secret, keeps it until a day before it expires, and replaces it after a
+  401.
+- **Webhook handler.** Finds the company from the payload's Linear workspace
+  id, verifies the signature and timestamp, records the `Linear-Delivery` id
+  to drop duplicates, then handles agent session events inline: an
+  acknowledgement first, then one issue read, routing, the Paperclip task, and
+  a wakeup. Linear expects an answer within 5 seconds and a first activity
+  within 10; if that proves too slow, the read and task creation move to a
+  job.
 - **Event handlers.** Turn Paperclip events into Linear activities and state
   moves (table in [user docs](../user/index.md#what-shows-up-in-linear)).
 - **Reconcile job.** Plugin events arrive at most once, so every 5 minutes the

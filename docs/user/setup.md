@@ -23,6 +23,8 @@ Install the plugin, then set its configuration for the company:
 | --- | --- |
 | `linearOrganizationId` | The Linear workspace id; deliveries from other workspaces are ignored |
 | `webhookSecret` | Secret reference to the webhook signing secret |
+| `linearClientId` | The OAuth app's client id |
+| `linearClientSecret` | Secret reference to the OAuth app's client secret; the plugin uses it to mint its own app token |
 | `mode` | `observe` (log only, the default) or `act` |
 | `routing.leads` | Lead agents by name: each a Paperclip project and agent id |
 | `routing.projects` | Linear project id to lead name |
