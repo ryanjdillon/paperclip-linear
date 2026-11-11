@@ -20,6 +20,11 @@ export function sessionKey(agentSessionId: string) {
   return { scopeKind: "instance", stateKey: `linear-session:${agentSessionId}` } as const;
 }
 
+/** Paperclip task id to the Linear agent session it came from. */
+export function taskKey(paperclipIssueId: string) {
+  return { scopeKind: "instance", stateKey: `paperclip-task:${paperclipIssueId}` } as const;
+}
+
 export type IntakeOutcome =
   | "ignored"
   | "observed"
@@ -129,6 +134,7 @@ async function routeSession(
     paperclipIssueId: task.id,
     lead: decision.name,
   } satisfies SessionLink);
+  await ctx.state.set(taskKey(task.id), sessionId);
   await ctx.issues.requestWakeup(task.id, companyId, {
     reason: "Delegated in Linear",
     idempotencyKey: `linear-session:${sessionId}`,

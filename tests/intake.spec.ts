@@ -1,64 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
-import type { LinearConfig } from "../src/config.js";
 import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, type SessionLink } from "../src/intake.js";
-import { AppTokenSource, LinearApi, LINEAR_GRAPHQL_URL, LINEAR_TOKEN_URL, type Fetch } from "../src/linear/api.js";
+import { AppTokenSource, LinearApi, LINEAR_TOKEN_URL, type Fetch } from "../src/linear/api.js";
+import { companyId, config, created, fakeLinear } from "./fakes.js";
 import manifest from "../src/manifest.js";
-
-const companyId = "company-1";
-
-function config(mode: LinearConfig["mode"] = "act"): LinearConfig {
-  return {
-    linearOrganizationId: "org-1",
-    webhookSecret: { type: "secret_ref", secretId: "s1" },
-    linearClientId: "client-1",
-    linearClientSecret: { type: "secret_ref", secretId: "s2" },
-    mode,
-    routing: {
-      leads: { delivery: { paperclipProjectId: "proj-delivery", agentId: "agent-delivery" } },
-      projects: { "lin-website": "delivery" },
-    },
-  };
-}
-
-/** A fake Linear: mints tokens, answers the issue query, records activities. */
-function fakeLinear(issue: { labels: string[]; projectId: string | null }) {
-  const activities: Array<{ type: string; body: string }> = [];
-  let tokens = 0;
-  const fetch: Fetch = async (url, init) => {
-    if (url === LINEAR_TOKEN_URL) {
-      tokens++;
-      expect(init.body).toContain("grant_type=client_credentials");
-      return { status: 200, ok: true, json: async () => ({ access_token: `tok-${tokens}`, expires_in: 2592000 }) };
-    }
-    expect(url).toBe(LINEAR_GRAPHQL_URL);
-    const { query, variables } = JSON.parse(init.body) as { query: string; variables: { input?: { content: { type: string; body: string } } } };
-    if (query.includes("agentActivityCreate")) {
-      activities.push(variables.input!.content);
-      return { status: 200, ok: true, json: async () => ({ data: { agentActivityCreate: { success: true } } }) };
-    }
-    return {
-      status: 200,
-      ok: true,
-      json: async () => ({
-        data: {
-          issue: {
-            id: "lin-issue-1",
-            identifier: "DIL-1",
-            title: "Fix the footer",
-            description: "It overlaps on mobile.",
-            url: "https://linear.app/x/issue/DIL-1",
-            project: issue.projectId ? { id: issue.projectId } : null,
-            labels: { nodes: issue.labels.map((name) => ({ name })) },
-          },
-        },
-      }),
-    };
-  };
-  return { fetch, activities, tokenCount: () => tokens, api: new LinearApi(fetch, new AppTokenSource(fetch, "client-1", "secret")) };
-}
-
-const created = { action: "created", agentSession: { id: "sess-1", issueId: "lin-issue-1", creatorId: "user-ryan" } };
 
 describe("agent session intake", () => {
   let harness: ReturnType<typeof createTestHarness>;

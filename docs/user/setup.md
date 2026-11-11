@@ -42,6 +42,9 @@ Then set its configuration for the company:
 | `mode` | `observe` (log only, the default) or `act` |
 | `routing.leads` | Lead agents by name: each a Paperclip project and agent id |
 | `routing.projects` | Linear project id to lead name |
+| `states` | Optional Linear workflow state ids: `started`, `inReview`, `done`; linked issues move only to states listed here |
+| `closeOnDone` | Whether a finished Paperclip task moves the Linear issue to `states.done` (default false) |
+| `paperclipUrl` | Optional base URL of the Paperclip UI, used in links from Linear (the private tailnet address is fine) |
 
 Saving the configuration records which company the Linear workspace belongs
 to. A delivery whose signature does not match, that is more than a minute

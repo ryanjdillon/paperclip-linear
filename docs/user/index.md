@@ -28,11 +28,15 @@ The lead agent may delegate further inside Paperclip.
 
 | In Paperclip | In Linear |
 | --- | --- |
-| An agent starts work | A "working" activity; the issue moves to the started state if mapped |
-| An agent comments | A response activity |
+| An agent starts work | A "working" activity; the issue moves to the started state if configured |
+| An agent comments | A response activity; people's and the plugin's own comments are not sent |
 | An approval or a question for a person | An elicitation in the agent session |
 | A run fails | An error activity with a link to Paperclip |
-| A run finishes | A summary response, with pull request links attached |
+| An agent links a pull request in a comment | The link is attached to the agent session |
+| The task moves to review | The issue moves to the review state if configured |
+| The task is done | A "finished" response; the issue moves to done only if `closeOnDone` is on |
 
-Linear keeps title, description, project, priority, labels, and workflow
-state. Canceling the Linear issue cancels the Paperclip task.
+Linear keeps title, description, project, priority, and labels. The plugin
+changes an issue's workflow state only to the states you configure.
+Canceling the Linear issue does not yet cancel the Paperclip task; the
+reconcile job will (DIL-868).

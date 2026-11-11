@@ -20,6 +20,12 @@ export interface LinearConfig {
   /** `observe` logs what the plugin would do; `act` does it (ADR 0006). */
   mode: "observe" | "act";
   routing: RoutingConfig;
+  /** Linear workflow state ids to move linked issues to; each is optional. */
+  states: { started?: string; inReview?: string; done?: string };
+  /** Whether a finished Paperclip task may move the Linear issue to `done`. */
+  closeOnDone: boolean;
+  /** Base URL of the Paperclip UI, for links back from Linear; optional. */
+  paperclipUrl?: string;
 }
 
 /** JSON Schema shown to the operator in Paperclip's plugin settings. */
@@ -32,6 +38,14 @@ export const configSchema = {
     linearClientId: { type: "string", title: "Linear OAuth app client id" },
     linearClientSecret: { type: "object", title: "Linear OAuth app client secret", format: "secret-ref" },
     mode: { type: "string", enum: ["observe", "act"], default: "observe", title: "Mode" },
+    states: {
+      type: "object",
+      title: "Linear workflow states",
+      description: "State ids linked issues move to; leave empty to never move them",
+      properties: { started: { type: "string" }, inReview: { type: "string" }, done: { type: "string" } },
+    },
+    closeOnDone: { type: "boolean", default: false, title: "Move to done when the Paperclip task is done" },
+    paperclipUrl: { type: "string", title: "Paperclip URL for links from Linear", format: "uri" },
     routing: {
       type: "object",
       title: "Routing",
@@ -84,6 +98,18 @@ export function parseConfig(raw: Record<string, unknown>): { config: LinearConfi
   for (const [project, name] of Object.entries(projects)) {
     if (!(name in leads)) problems.push(`project ${project} routes to unknown lead ${name}`);
   }
+  const states = (raw.states ?? {}) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(states)) {
+    if (!["started", "inReview", "done"].includes(key)) problems.push(`states.${key} is not a known state`);
+    else if (typeof value !== "string") problems.push(`states.${key} must be a state id`);
+  }
+  const closeOnDone = raw.closeOnDone ?? false;
+  if (typeof closeOnDone !== "boolean") problems.push("closeOnDone must be true or false");
+  if (closeOnDone === true && typeof states.done !== "string") problems.push("closeOnDone needs states.done");
+  const paperclipUrl = raw.paperclipUrl;
+  if (paperclipUrl !== undefined && (typeof paperclipUrl !== "string" || !/^https?:\/\//.test(paperclipUrl))) {
+    problems.push("paperclipUrl must be an http(s) URL");
+  }
   if (problems.length > 0) return { problems };
   return {
     config: {
@@ -93,6 +119,9 @@ export function parseConfig(raw: Record<string, unknown>): { config: LinearConfi
       linearClientSecret: clientSecret as SecretRef,
       mode: mode as LinearConfig["mode"],
       routing: { leads, projects },
+      states: states as LinearConfig["states"],
+      closeOnDone: closeOnDone as boolean,
+      ...(typeof paperclipUrl === "string" ? { paperclipUrl } : {}),
     },
   };
 }

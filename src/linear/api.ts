@@ -90,6 +90,22 @@ export class LinearApi {
     );
   }
 
+  /** Attach links (pull requests) to an agent session. */
+  async addExternalUrls(agentSessionId: string, urls: Array<{ label: string; url: string }>): Promise<void> {
+    await this.graphql(
+      `mutation AddUrls($id: String!, $input: AgentSessionUpdateInput!) { agentSessionUpdate(id: $id, input: $input) { success } }`,
+      { id: agentSessionId, input: { addedExternalUrls: urls } },
+    );
+  }
+
+  /** Move an issue to a workflow state. */
+  async setIssueState(issueId: string, stateId: string): Promise<void> {
+    await this.graphql(
+      `mutation SetState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`,
+      { id: issueId, input: { stateId } },
+    );
+  }
+
   /** The issue fields routing and the Paperclip task need. */
   async issue(id: string): Promise<LinearIssue> {
     const data = await this.graphql<{ issue: RawIssue }>(

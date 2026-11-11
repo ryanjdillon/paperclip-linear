@@ -2,6 +2,7 @@ import { definePlugin, runWorker, type PluginContext, type PluginWebhookInput } 
 import { parseConfig, type LinearConfig } from "./config.js";
 import { handleAgentSessionEvent, type AgentSessionPayload } from "./intake.js";
 import { AppTokenSource, LinearApi, type Fetch } from "./linear/api.js";
+import { handleStatusEvent, STATUS_EVENTS } from "./status.js";
 import { checkDelivery, firstDelivery } from "./linear/webhook.js";
 
 /** Instance state key mapping a Linear workspace to the Paperclip company configured for it. */
@@ -90,6 +91,23 @@ const plugin = definePlugin({
   async setup(context) {
     ctx = context;
     context.data.register("health", async () => ({ status: "ok", checkedAt: new Date().toISOString() }));
+    for (const eventType of STATUS_EVENTS) {
+      context.events.on(eventType, async (event) => {
+        try {
+          const parsed = parseConfig(await context.config.get(event.companyId));
+          if ("problems" in parsed) return;
+          const linear = await linearFor(context, event.companyId, parsed.config, hostFetch(context));
+          const outcome = await handleStatusEvent(
+            { ctx: context, linear, config: parsed.config, paperclipUrl: parsed.config.paperclipUrl },
+            event,
+          );
+          context.logger.info("Handled a Paperclip event for Linear", { eventType, outcome });
+        } catch (error) {
+          // Events arrive at most once; the reconcile job (DIL-868) repairs gaps.
+          context.logger.error("Failed to report a Paperclip event to Linear", { eventType, error: String(error) });
+        }
+      });
+    }
   },
 
   async onConfigChanged(newConfig, change) {
