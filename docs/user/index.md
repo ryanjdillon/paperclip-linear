@@ -2,6 +2,8 @@
 
 How the plugin behaves for someone working in Linear and Paperclip.
 
+- [Setup](setup.md): connecting a Linear workspace to a Paperclip company.
+
 ## Getting work to an agent
 
 Delegate a Linear issue to the plugin's Linear agent. The plugin replies in

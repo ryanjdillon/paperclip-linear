@@ -1,4 +1,5 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
+import { configSchema } from "./config.js";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: "ryanjdillon.paperclip-linear",
@@ -9,14 +10,24 @@ const manifest: PaperclipPluginManifestV1 = {
   author: "ryanjdillon",
   categories: ["connector"],
   capabilities: [
-    "events.subscribe",
+    "webhooks.receive",
+    "secrets.read-ref",
     "plugin.state.read",
     "plugin.state.write",
-    "ui.dashboardWidget.register"
+    "events.subscribe",
+    "ui.dashboardWidget.register",
+  ],
+  instanceConfigSchema: configSchema as unknown as PaperclipPluginManifestV1["instanceConfigSchema"],
+  webhooks: [
+    {
+      endpointKey: "linear",
+      displayName: "Linear",
+      description: "Agent session, issue, and comment events from the Linear app",
+    },
   ],
   entrypoints: {
     worker: "./dist/worker.js",
-    ui: "./dist/ui"
+    ui: "./dist/ui",
   },
   ui: {
     slots: [
@@ -24,10 +35,10 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "dashboardWidget",
         id: "health-widget",
         displayName: "Linear Health",
-        exportName: "DashboardWidget"
-      }
-    ]
-  }
+        exportName: "DashboardWidget",
+      },
+    ],
+  },
 };
 
 export default manifest;
