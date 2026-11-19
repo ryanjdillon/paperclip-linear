@@ -29,7 +29,9 @@ async function linearFor(context: PluginContext, companyId: string, config: Line
   const key = `${companyId}:${config.linearClientId}`;
   let tokens = tokenSources.get(key);
   if (!tokens) {
-    const secret = await context.secrets.resolve(config.linearClientSecret);
+    // Webhooks and jobs run outside a company invocation, so every secret
+    // lookup names its company; the host refuses it otherwise.
+    const secret = () => context.secrets.resolve(config.linearClientSecret, { companyId, configPath: "linearClientSecret" });
     tokens = new AppTokenSource(fetch, config.linearClientId, secret);
     tokenSources.set(key, tokens);
   }
@@ -65,7 +67,7 @@ export async function handleLinearWebhook(
     context.logger.warn("Linear plugin is not configured for this company", { companyId, problems: parsed.problems });
     return "not_configured";
   }
-  const secret = await context.secrets.resolve(parsed.config.webhookSecret);
+  const secret = await context.secrets.resolve(parsed.config.webhookSecret, { companyId, configPath: "webhookSecret" });
   const check = checkDelivery(input, secret, now);
   if (!check.ok) {
     context.logger.warn("Rejected a Linear delivery", { companyId, reason: check.reason });
