@@ -5,7 +5,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import manifest from "../src/manifest.js";
 import { handleAgentSessionEvent } from "../src/intake.js";
 import { COMPANIES_KEY } from "../src/reconcile.js";
-import { handleLinearWebhook, organizationKey, runReconcile } from "../src/worker.js";
+import { handleLinearWebhook, organizationKey, runReconcile, tokenSources } from "../src/worker.js";
 import { companyId, config, created, fakeLinear } from "./fakes.js";
 
 const webhookSecret = "whsec_test";
@@ -44,6 +44,7 @@ describe("secret resolution names the company", () => {
   beforeEach(async () => {
     harness = createTestHarness({ manifest, config: config("observe") as unknown as Record<string, unknown> });
     calls = [];
+    tokenSources.clear();
     strictSecrets(harness.ctx, calls);
     await harness.ctx.state.set(organizationKey("org-1"), companyId);
     await harness.ctx.state.set(COMPANIES_KEY, [companyId]);
@@ -59,6 +60,22 @@ describe("secret resolution names the company", () => {
     );
     expect(outcome).toBe("accepted");
     expect(calls).toContainEqual({ companyId, configPath: "webhookSecret" });
+  });
+
+  it("handles an agent session delivery through intake, minting with the company", async () => {
+    harness.setConfig(config("act") as unknown as Record<string, unknown>);
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" });
+    const now = Date.now();
+    const outcome = await handleLinearWebhook(
+      harness.ctx,
+      signedDelivery({ type: "AgentSessionEvent", organizationId: "org-1", ...created }, now),
+      now,
+      linear.fetch,
+    );
+    expect(outcome).toBe("accepted");
+    expect(calls).toContainEqual({ companyId, configPath: "linearClientSecret" });
+    expect(harness.logs.filter((l) => l.message === "Failed to handle a Linear agent session event")).toEqual([]);
+    expect(harness.logs.some((l) => l.message === "Handled a Linear agent session event")).toBe(true);
   });
 
   it("resolves the client secret for the reconcile job with the company", async () => {

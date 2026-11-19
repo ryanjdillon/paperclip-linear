@@ -23,7 +23,7 @@ export type WebhookOutcome =
 let ctx: PluginContext | undefined;
 
 /** One app token source per company and client id, so tokens survive between deliveries. */
-const tokenSources = new Map<string, AppTokenSource>();
+export const tokenSources = new Map<string, AppTokenSource>();
 
 async function linearFor(context: PluginContext, companyId: string, config: LinearConfig, fetch: Fetch): Promise<LinearApi> {
   const key = `${companyId}:${config.linearClientId}`;
@@ -47,6 +47,8 @@ function hostFetch(context: PluginContext): Fetch {
  * Handle one Linear delivery. Webhooks carry no Paperclip company, so the
  * Linear workspace id in the payload selects the company. Never throws for a
  * bad delivery: a 502 would make Linear retry something that will never pass.
+ * A host failure before the delivery id is recorded (for example the host's
+ * secret-resolve rate limit) does throw, so Linear retries it.
  */
 export async function handleLinearWebhook(
   context: PluginContext,
@@ -134,6 +136,9 @@ const plugin = definePlugin({
 
   async onConfigChanged(newConfig, change) {
     if (!ctx || !change?.companyId) return;
+    // A changed config may point a secret at another ref; drop cached token
+    // sources so the next mint resolves the new one.
+    for (const key of [...tokenSources.keys()]) if (key.startsWith(`${change.companyId}:`)) tokenSources.delete(key);
     const parsed = parseConfig(newConfig);
     if ("config" in parsed) {
       await ctx.state.set(organizationKey(parsed.config.linearOrganizationId), change.companyId);
