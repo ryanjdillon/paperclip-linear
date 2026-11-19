@@ -25,13 +25,15 @@ export class AppTokenSource {
   constructor(
     private readonly fetch: Fetch,
     private readonly clientId: string,
-    private readonly clientSecret: string,
+    /** The client secret, or a resolver called at each mint so the value is not kept. */
+    private readonly clientSecret: string | (() => Promise<string>),
     private readonly now: () => number = Date.now,
   ) {}
 
   async get(): Promise<string> {
     if (this.token && this.now() < this.token.renewAt) return this.token.value;
-    const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64");
+    const secret = typeof this.clientSecret === "string" ? this.clientSecret : await this.clientSecret();
+    const basic = Buffer.from(`${this.clientId}:${secret}`).toString("base64");
     const response = await this.fetch(LINEAR_TOKEN_URL, {
       method: "POST",
       headers: { authorization: `Basic ${basic}`, "content-type": "application/x-www-form-urlencoded" },
