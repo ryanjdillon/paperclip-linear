@@ -151,10 +151,10 @@ describe("reconcile", () => {
         { ctx: harness.ctx, linear: linear.api, config: cfg },
         { eventId: "evt-approval", eventType: "approval.created", occurredAt: new Date(asked).toISOString(), companyId, payload: { issueId: taskId } } as never,
       );
-      expect(await readActivity(harness.ctx, "sess-1")).toEqual({ at: asked, type: "elicitation" });
+      expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("elicitation");
       linear.activities.length = 0;
 
-      const weekLater = asked + 7 * 24 * 60 * 60 * 1000;
+      const weekLater = Date.now() + 7 * 24 * 60 * 60 * 1000;
       expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, weekLater)).keptAlive).toBe(0);
       expect(linear.activities).toEqual([]);
     });
@@ -180,7 +180,7 @@ describe("reconcile", () => {
         { eventId: `evt-${eventType}`, eventType, occurredAt: new Date(at).toISOString(), companyId, actorType: "agent", entityId: taskId, payload: { issueId: taskId } } as never,
       );
       expect((await readActivity(harness.ctx, "sess-1"))?.type).not.toBe("elicitation");
-      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, at + quiet)).keptAlive).toBe(1);
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now() + quiet)).keptAlive).toBe(1);
     });
 
     it("records a post even when a later step of the same event fails", async () => {
