@@ -35,6 +35,26 @@ export function lastActivityKey(agentSessionId: string) {
   return { scopeKind: "instance", stateKey: `linear-last-activity:${agentSessionId}` } as const;
 }
 
+/** The Linear activity types the plugin posts. */
+export type ActivityType = "thought" | "elicitation" | "response" | "error";
+
+/** The plugin's last post to a session: when, and of which type. */
+export interface LastActivity {
+  at: number;
+  type: ActivityType;
+}
+
+export async function recordActivity(ctx: PluginContext, sessionId: string, at: number, type: ActivityType) {
+  await ctx.state.set(lastActivityKey(sessionId), { at, type } satisfies LastActivity);
+}
+
+/** Older versions stored only the time, after a thought. */
+export async function readActivity(ctx: PluginContext, sessionId: string): Promise<LastActivity | null> {
+  const value = (await ctx.state.get(lastActivityKey(sessionId))) as LastActivity | number | null;
+  if (value === null || value === undefined) return null;
+  return typeof value === "number" ? { at: value, type: "thought" } : value;
+}
+
 /**
  * Report one Paperclip event on a linked task to its Linear agent session
  * (design doc, "What shows up in Linear"). Linear keeps its own fields; the
@@ -63,7 +83,7 @@ export async function handleStatusEvent(deps: StatusDeps, event: PluginEvent): P
   if ((await ctx.state.get(key)) !== null) return "duplicate";
   await ctx.state.set(key, { at: event.occurredAt, sessionId });
   await plan.run(sessionId);
-  await ctx.state.set(lastActivityKey(sessionId), Date.parse(event.occurredAt) || Date.now());
+  if (plan.activity) await recordActivity(ctx, sessionId, Date.parse(event.occurredAt) || Date.now(), plan.activity);
   return "reported";
 }
 
@@ -71,6 +91,8 @@ interface Plan {
   kind: string;
   /** A stable key the reconcile job can check; defaults to the event id and kind. */
   key?: string;
+  /** The activity type the plan posts to the session, if it posts one. */
+  activity?: ActivityType;
   run(sessionId: string): Promise<void>;
 }
 
@@ -91,6 +113,7 @@ async function planFor(
     case "agent.run.started":
       return {
         kind: "started",
+        activity: "thought",
         run: async (sessionId) => {
           await linear.postActivity(sessionId, "thought", "Working on it in Paperclip.", true);
           if (config.states.started) await linear.setIssueState(link.linearIssueId, config.states.started);
@@ -100,6 +123,7 @@ async function planFor(
       const reason = (payload.error as string | null) ?? (payload.errorCode as string | null) ?? "unknown error";
       return {
         kind: "failed",
+        activity: "error",
         run: (sessionId) => linear.postActivity(sessionId, "error", `The Paperclip run failed: ${reason}.${taskLink}`),
       };
     }
@@ -114,6 +138,7 @@ async function planFor(
       const urls = [...new Set(comment.body.match(PR_URL) ?? [])];
       return {
         kind: "comment",
+        activity: "response",
         key: commentOutbound(comment.id),
         run: async (sessionId) => {
           await linear.postActivity(sessionId, "response", comment.body);
@@ -124,6 +149,7 @@ async function planFor(
     case "approval.created":
       return {
         kind: "approval",
+        activity: "elicitation",
         run: (sessionId) =>
           linear.postActivity(sessionId, "elicitation", `An approval is waiting in Paperclip before work continues.${taskLink}`),
       };
@@ -135,6 +161,7 @@ async function planFor(
       if (status === "done") {
         return {
           kind: "done",
+          activity: "response",
           key: doneOutbound(taskId),
           run: async (sessionId) => {
             await linear.postActivity(sessionId, "response", "Finished in Paperclip.");

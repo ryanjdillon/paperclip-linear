@@ -4,6 +4,7 @@ import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, type SessionLink } fr
 import { AppTokenSource, LinearApi, LINEAR_TOKEN_URL, type Fetch } from "../src/linear/api.js";
 import { companyId, config, created, fakeLinear } from "./fakes.js";
 import manifest from "../src/manifest.js";
+import { readActivity } from "../src/status.js";
 
 describe("agent session intake", () => {
   let harness: ReturnType<typeof createTestHarness>;
@@ -46,6 +47,7 @@ describe("agent session intake", () => {
     expect(unmatched.activities.at(-1)).toMatchObject({ type: "elicitation" });
     expect(unmatched.activities.at(-1)!.body).toContain("delivery");
     expect((harness.getState(sessionKey("sess-1")) as SessionLink).status).toBe("awaiting_route");
+    expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("elicitation");
 
     const labelled = fakeLinear({ labels: ["lead:delivery"], projectId: null });
     const prompted = { action: "prompted", agentSession: created.agentSession, agentActivity: { body: "Added the label" } };
@@ -61,6 +63,8 @@ describe("agent session intake", () => {
     const link = harness.getState(sessionKey("sess-1")) as SessionLink;
     const comments = await harness.ctx.issues.listComments(link.paperclipIssueId!, companyId);
     expect(comments.at(-1)?.body).toContain("Use the new palette");
+    expect(linear.activities.at(-1)).toMatchObject({ type: "thought" });
+    expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("thought");
   });
 
   it("writes nothing in observe mode", async () => {

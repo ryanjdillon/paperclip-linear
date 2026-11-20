@@ -3,7 +3,7 @@ import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import { handleAgentSessionEvent, sessionKey, type SessionLink } from "../src/intake.js";
 import manifest from "../src/manifest.js";
 import { KEEP_ALIVE_AFTER_MS, reconcileCompany } from "../src/reconcile.js";
-import { handleStatusEvent, lastActivityKey } from "../src/status.js";
+import { handleStatusEvent, lastActivityKey, readActivity, recordActivity } from "../src/status.js";
 import { companyId, config, created, fakeLinear } from "./fakes.js";
 
 describe("reconcile", () => {
@@ -120,6 +120,62 @@ describe("reconcile", () => {
     const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());
     expect(report.woken).toBe(0);
     expect((await harness.ctx.issues.get(taskId, companyId))?.status).toBe("backlog");
+  });
+
+  describe("keep-alive while work waits", () => {
+    const quiet = KEEP_ALIVE_AFTER_MS + 1;
+
+    async function quietFor(status: string, type: "thought" | "elicitation" | "response", at: number) {
+      await harness.ctx.issues.update(taskId, { status } as never, companyId);
+      await recordActivity(harness.ctx, "sess-1", at, type);
+    }
+
+    it.each([
+      ["backlog", "Waiting in the Paperclip backlog."],
+      ["todo", "Queued in Paperclip."],
+      ["in_progress", "Still working on it in Paperclip."],
+      ["blocked", "Blocked in Paperclip until another task finishes."],
+      ["in_review", "Waiting for review in Paperclip."],
+    ])("keeps a quiet %s task's session alive", async (status, text) => {
+      const now = Date.now();
+      await quietFor(status, "thought", now - quiet);
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(1);
+      expect(linear.activities).toEqual([expect.objectContaining({ type: "thought", body: text })]);
+      expect(await readActivity(harness.ctx, "sess-1")).toEqual({ at: now, type: "thought" });
+    });
+
+    it("never posts over a question to the owner, however long it waits", async () => {
+      await harness.ctx.issues.update(taskId, { status: "in_progress" }, companyId);
+      const asked = Date.parse("2026-11-11T12:00:00Z");
+      await handleStatusEvent(
+        { ctx: harness.ctx, linear: linear.api, config: cfg },
+        { eventId: "evt-approval", eventType: "approval.created", occurredAt: new Date(asked).toISOString(), companyId, payload: { issueId: taskId } } as never,
+      );
+      expect(await readActivity(harness.ctx, "sess-1")).toEqual({ at: asked, type: "elicitation" });
+      linear.activities.length = 0;
+
+      const weekLater = asked + 7 * 24 * 60 * 60 * 1000;
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, weekLater)).keptAlive).toBe(0);
+      expect(linear.activities).toEqual([]);
+    });
+
+    it("leaves a task in review after the agent's answer", async () => {
+      const now = Date.now();
+      await quietFor("in_review", "response", now - quiet);
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(0);
+    });
+
+    it("keeps working after an answer while the task is still in progress", async () => {
+      const now = Date.now();
+      await quietFor("in_progress", "response", now - quiet);
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(1);
+    });
+
+    it("reads a time-only record from an older version as a thought", async () => {
+      const now = Date.now();
+      await harness.ctx.state.set(lastActivityKey("sess-1"), now - quiet);
+      expect(await readActivity(harness.ctx, "sess-1")).toEqual({ at: now - quiet, type: "thought" });
+    });
   });
 
   it("changes nothing in observe mode but still reports what it found", async () => {

@@ -46,9 +46,11 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   whose Linear issue was canceled, and retries the wake of a routed task in
   `backlog` or `todo` that has no queued wake on record. Each retry uses a new
   idempotency key, because the server may keep the key of a refused wake. It
-  replays agent
-  comments and completions with no outbound record, and posts a keep-alive thought when a task in progress
-  has been quiet for 20 minutes.
+  replays agent comments and completions with no outbound record. It posts a
+  status thought for any open task quiet for 20 minutes, except after a
+  question to the owner, or after the agent's answer on a task in review.
+  Linear keeps a session that asked a question in "Needs input" with no help
+  (probed 2026-11-20, DIL-940). A thought may replace that state (not probed).
 - **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
   authenticated with a client-credentials token of the same Linear app, so
   their writes also appear as the app (ADR 0007). A scheduled job rotates the

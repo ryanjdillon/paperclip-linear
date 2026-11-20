@@ -2,12 +2,24 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
 import { ORIGIN_KIND, sessionKey, taskKey, wakeLead, type SessionLink } from "./intake.js";
 import type { LinearApi } from "./linear/api.js";
-import { commentOutbound, doneOutbound, lastActivityKey, outboundKey } from "./status.js";
+import { commentOutbound, doneOutbound, outboundKey, readActivity, recordActivity } from "./status.js";
 
 export const RECONCILE_JOB = "reconcile";
 
 /** Linear marks a session stale after about 30 minutes without activity. */
 export const KEEP_ALIVE_AFTER_MS = 20 * 60 * 1000;
+
+/**
+ * The keep-alive text for each open task status. Work that waits keeps its
+ * session: only a canceled Linear issue ends it.
+ */
+const KEEP_ALIVE_TEXT: Record<string, string> = {
+  backlog: "Waiting in the Paperclip backlog.",
+  todo: "Queued in Paperclip.",
+  in_progress: "Still working on it in Paperclip.",
+  blocked: "Blocked in Paperclip until another task finishes.",
+  in_review: "Waiting for review in Paperclip.",
+};
 
 /** Instance state listing the companies the plugin is configured for; jobs carry no company. */
 export const COMPANIES_KEY = { scopeKind: "instance", stateKey: "linear-companies" } as const;
@@ -26,8 +38,8 @@ export interface ReconcileReport {
  * Bring one company's linked tasks back in line with Linear. Plugin events
  * arrive at most once, so this job replays what was missed: agent comments
  * and completion reports. It also cancels Paperclip tasks whose Linear issue
- * was canceled, wakes routed tasks whose first wake failed, and keeps
- * sessions with work in progress from going stale.
+ * was canceled, wakes routed tasks whose first wake failed, and keeps the
+ * sessions of open tasks from going stale, except where a question waits.
  */
 export async function reconcileCompany(
   ctx: PluginContext,
@@ -65,7 +77,7 @@ export async function reconcileCompany(
           const queued = await wakeLead(ctx, companyId, sessionId, link, now, `linear-session:${sessionId}:reconcile:${now}`);
           if (queued) {
             await linear.postActivity(sessionId, "thought", `Queued in Paperclip for the ${link.lead} lead.`);
-            await ctx.state.set(lastActivityKey(sessionId), now);
+            await recordActivity(ctx, sessionId, now, "thought");
           }
         }
         report.woken++;
@@ -80,6 +92,7 @@ export async function reconcileCompany(
         if (act) {
           await ctx.state.set(key, { at: new Date(now).toISOString(), sessionId, replayed: true });
           await linear.postActivity(sessionId, "response", comment.body);
+          await recordActivity(ctx, sessionId, now, "response");
         }
         report.commentsReplayed++;
       }
@@ -90,16 +103,22 @@ export async function reconcileCompany(
           if (act) {
             await ctx.state.set(key, { at: new Date(now).toISOString(), sessionId, replayed: true });
             await linear.postActivity(sessionId, "response", "Finished in Paperclip.");
+            await recordActivity(ctx, sessionId, now, "response");
             if (config.closeOnDone && config.states.done) await linear.setIssueState(link.linearIssueId, config.states.done);
           }
           report.doneReported++;
         }
-      } else if (task.status === "in_progress") {
-        const last = (await ctx.state.get(lastActivityKey(sessionId))) as number | null;
-        if (last === null || now - last > KEEP_ALIVE_AFTER_MS) {
+      } else if (task.status in KEEP_ALIVE_TEXT) {
+        const last = await readActivity(ctx, sessionId);
+        // A question to the owner keeps its session in "Needs input" without
+        // help, and a thought would replace that state. The same holds for the
+        // agent's answer on a task in review: the session waits for the owner.
+        const waitsForOwner =
+          last?.type === "elicitation" || (task.status === "in_review" && last?.type === "response");
+        if (!waitsForOwner && (last === null || now - last.at > KEEP_ALIVE_AFTER_MS)) {
           if (act) {
-            await linear.postActivity(sessionId, "thought", "Still working on it in Paperclip.", true);
-            await ctx.state.set(lastActivityKey(sessionId), now);
+            await linear.postActivity(sessionId, "thought", KEEP_ALIVE_TEXT[task.status], true);
+            await recordActivity(ctx, sessionId, now, "thought");
           }
           report.keptAlive++;
         }
