@@ -35,6 +35,7 @@ describe("status back to Linear", () => {
     expect(await handleStatusEvent(deps, event("agent.run.started", { issueId: taskId }))).toBe("reported");
     expect(linear.activities).toEqual([expect.objectContaining({ type: "thought" })]);
     expect(linear.stateMoves).toEqual([{ id: "lin-issue-1", stateId: "st-started" }]);
+    expect(linear.teamQueries).toEqual([{ issue: "lin-issue-1", state: "st-started" }]);
   });
 
   it("posts an agent's comment as a response and attaches pull request links", async () => {
@@ -88,6 +89,24 @@ describe("status back to Linear", () => {
     expect(await handleStatusEvent(deps, event("issue.updated", { status: "done" }, { entityId: taskId }))).toBe("reported");
     expect(linear.activities.map((a) => a.type)).toEqual(["thought", "response"]);
     expect(linear.stateMoves).toEqual([]);
+  });
+
+  it("reports but does not move an issue when Linear gives no team", async () => {
+    linear.issue.teamId = null;
+    expect(await handleStatusEvent(deps, event("agent.run.started", { issueId: taskId }))).toBe("reported");
+    expect(linear.activities).toEqual([expect.objectContaining({ type: "thought" })]);
+    expect(linear.stateMoves).toEqual([]);
+    expect(await deps.linear.setIssueState("lin-issue-1", "st-started")).toEqual({ reason: "missing" });
+  });
+
+  it("names both teams when it skips a move for another team", async () => {
+    linear.issue.teamId = "team-other";
+    expect(await deps.linear.setIssueState("lin-issue-1", "st-review")).toEqual({
+      reason: "other-team",
+      issueTeamId: "team-other",
+      stateTeamId: "team-1",
+    });
+    expect(linear.teamQueries).toEqual([{ issue: "lin-issue-1", state: "st-review" }]);
   });
 
   it("writes once per event, and nothing for unlinked tasks or in observe mode", async () => {
