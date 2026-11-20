@@ -22,7 +22,10 @@ describe("agent session intake", () => {
     const [task] = await harness.ctx.issues.list({ companyId, originKind: ORIGIN_KIND });
     expect(task).toMatchObject({ projectId: "proj-delivery", assigneeAgentId: "agent-delivery", title: "DIL-1 Fix the footer", originId: "lin-issue-1" });
     expect(task.description).toContain("https://linear.app/x/issue/DIL-1");
+    // Explicit, because the server defaults to backlog and does not wake an agent there.
+    expect(task.status).toBe("todo");
     expect(harness.getState(sessionKey("sess-1"))).toMatchObject({ status: "routed", paperclipIssueId: task.id, delegatedBy: "user-ryan" });
+    expect((harness.getState(sessionKey("sess-1")) as SessionLink).wokenAt).toBeDefined();
     expect(linear.activities.map((a) => a.type)).toEqual(["thought", "thought"]);
     expect(linear.activities[1].body).toContain("delivery lead");
     expect(linear.tokenCount()).toBe(1);
