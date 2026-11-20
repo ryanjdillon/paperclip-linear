@@ -106,10 +106,11 @@ async function planFor(
 ): Promise<Plan | null> {
   const { ctx, linear, config } = deps;
   // Record each post as soon as it is made: a later step can fail, and the
-  // event is not retried once its outbound key is set.
+  // event is not retried once its outbound key is set. Record the time of the
+  // post, not of the event, so a clock that runs ahead cannot delay the keep-alive.
   const post = async (sessionId: string, type: ActivityType, body: string, ephemeral?: boolean) => {
     await linear.postActivity(sessionId, type, body, ephemeral);
-    await recordActivity(ctx, sessionId, Date.parse(event.occurredAt) || Date.now(), type);
+    await recordActivity(ctx, sessionId, Date.now(), type);
   };
   const taskLink = deps.paperclipUrl ? ` ${deps.paperclipUrl.replace(/\/$/, "")}/issues/${taskId}` : "";
   switch (event.eventType) {
