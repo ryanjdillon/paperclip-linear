@@ -2,7 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
 import type { LinearApi } from "./linear/api.js";
 import { route } from "./routing.js";
-import { lastActivityKey } from "./status.js";
+import { recordActivity } from "./status.js";
 
 export const ORIGIN_KIND = "plugin:ryanjdillon.paperclip-linear" as const;
 
@@ -79,6 +79,10 @@ export async function handleAgentSessionEvent(deps: IntakeDeps, payload: AgentSe
       reason: "Follow-up in Linear",
       idempotencyKey: `linear-prompt:${sessionId}:${body.length}:${hash(body)}`,
     });
+    // The reply ends a question; record a thought so that reconcile keeps the
+    // session alive again.
+    await deps.linear.postActivity(sessionId, "thought", "Passed to the Paperclip agent.", true);
+    await recordActivity(deps.ctx, sessionId, Date.now(), "thought");
     return "prompt_forwarded";
   }
   if (payload.action !== "created") return "ignored";
@@ -117,6 +121,7 @@ async function routeSession(
       "elicitation",
       `Which lead should take this? Add a \`lead:<name>\` label, then reply here. Leads: ${leads.join(", ") || "none configured"}.`,
     );
+    await recordActivity(ctx, sessionId, Date.now(), "elicitation");
     return "asked";
   }
 
@@ -143,7 +148,7 @@ async function routeSession(
   await ctx.state.set(taskKey(task.id), sessionId);
   await wakeLead(ctx, companyId, sessionId, link, Date.now(), `linear-session:${sessionId}`);
   await linear.postActivity(sessionId, "thought", `Queued in Paperclip for the ${decision.name} lead.`);
-  await ctx.state.set(lastActivityKey(sessionId), Date.now());
+  await recordActivity(ctx, sessionId, Date.now(), "thought");
   return "routed";
 }
 
