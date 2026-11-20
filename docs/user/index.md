@@ -39,5 +39,5 @@ The lead agent may delegate further inside Paperclip.
 Linear keeps title, description, project, priority, and labels. The plugin
 changes an issue's workflow state only to the states you configure.
 Every 5 minutes a reconcile job cancels Paperclip tasks whose Linear issue
-was canceled, sends agent comments and completions whose events were missed,
-and keeps sessions with work in progress from going stale in Linear.
+was canceled, wakes agents whose first wake failed, sends agent comments and
+completions whose events were missed, and keeps sessions with work in progress from going stale in Linear.

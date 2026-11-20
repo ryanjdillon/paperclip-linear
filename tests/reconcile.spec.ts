@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import { handleAgentSessionEvent, sessionKey, type SessionLink } from "../src/intake.js";
 import manifest from "../src/manifest.js";
@@ -60,6 +60,66 @@ describe("reconcile", () => {
     await harness.ctx.state.set(lastActivityKey("sess-1"), now - KEEP_ALIVE_AFTER_MS - 1);
     expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(1);
     expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now + 1000)).keptAlive).toBe(0);
+  });
+
+  it("wakes a routed task whose first wake failed, once", async () => {
+    // As the server leaves it when the wake is refused: in backlog, with no wake record.
+    await harness.ctx.issues.update(taskId, { status: "backlog" }, companyId);
+    const { wokenAt: _, ...link } = harness.getState(sessionKey("sess-1")) as SessionLink;
+    await harness.ctx.state.set(sessionKey("sess-1"), link);
+
+    const now = Date.now();
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).woken).toBe(1);
+    expect((await harness.ctx.issues.get(taskId, companyId))?.status).toBe("todo");
+    expect(harness.getState(sessionKey("sess-1"))).toMatchObject({ wokenAt: new Date(now).toISOString() });
+    expect(linear.activities.map((a) => a.type)).toEqual(["thought"]);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now + 1000)).woken).toBe(0);
+  });
+
+  it("retries a wake that failed at intake, after the task was already todo", async () => {
+    const fresh = createTestHarness({ manifest });
+    const wake = vi.spyOn(fresh.ctx.issues, "requestWakeup").mockRejectedValueOnce(new Error("host unavailable"));
+    await expect(handleAgentSessionEvent({ ctx: fresh.ctx, linear: linear.api, companyId, config: cfg }, created)).rejects.toThrow();
+    const link = fresh.getState(sessionKey("sess-1")) as SessionLink;
+    expect(link.wokenAt).toBeUndefined();
+    expect((await fresh.ctx.issues.get(link.paperclipIssueId!, companyId))?.status).toBe("todo");
+
+    expect((await reconcileCompany(fresh.ctx, linear.api, companyId, cfg, Date.now())).woken).toBe(1);
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect(wake.mock.calls[1][2]?.idempotencyKey).not.toBe(wake.mock.calls[0][2]?.idempotencyKey);
+    expect((fresh.getState(sessionKey("sess-1")) as SessionLink).wokenAt).toBeDefined();
+  });
+
+  it("does not record a wake that the server did not queue, and retries it", async () => {
+    const { wokenAt: _, ...link } = harness.getState(sessionKey("sess-1")) as SessionLink;
+    await harness.ctx.state.set(sessionKey("sess-1"), link);
+    const wake = vi.spyOn(harness.ctx.issues, "requestWakeup").mockResolvedValueOnce({ queued: false } as never);
+
+    const now = Date.now();
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).woken).toBe(1);
+    expect((harness.getState(sessionKey("sess-1")) as SessionLink).wokenAt).toBeUndefined();
+    expect(linear.activities).toEqual([]);
+
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now + 1000)).woken).toBe(1);
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect((harness.getState(sessionKey("sess-1")) as SessionLink).wokenAt).toBeDefined();
+  });
+
+  it("cancels an unwoken backlog task whose Linear issue was canceled, rather than waking it", async () => {
+    await harness.ctx.issues.update(taskId, { status: "backlog" }, companyId);
+    const { wokenAt: _, ...link } = harness.getState(sessionKey("sess-1")) as SessionLink;
+    await harness.ctx.state.set(sessionKey("sess-1"), link);
+    linear.issue.stateType = "canceled";
+    const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());
+    expect(report).toMatchObject({ cancelled: 1, woken: 0 });
+    expect((await harness.ctx.issues.get(taskId, companyId))?.status).toBe("cancelled");
+  });
+
+  it("leaves a woken task that the owner moved to backlog", async () => {
+    await harness.ctx.issues.update(taskId, { status: "backlog" }, companyId);
+    const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());
+    expect(report.woken).toBe(0);
+    expect((await harness.ctx.issues.get(taskId, companyId))?.status).toBe("backlog");
   });
 
   it("changes nothing in observe mode but still reports what it found", async () => {

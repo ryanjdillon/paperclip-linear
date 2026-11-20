@@ -15,6 +15,8 @@ export interface SessionLink {
   status: "routed" | "awaiting_route";
   paperclipIssueId?: string;
   lead?: string;
+  /** When the server queued the lead agent's wake. Reconcile wakes a routed task that has none. */
+  wokenAt?: string;
 }
 
 export function sessionKey(agentSessionId: string) {
@@ -121,28 +123,49 @@ async function routeSession(
   const task = await ctx.issues.create({
     companyId,
     projectId: decision.lead.paperclipProjectId,
+    // Paperclip defaults to backlog, and it does not wake an agent on a backlog issue.
+    status: "todo",
     title: `${issue.identifier} ${issue.title}`,
     description: `${issue.description}\n\nLinear: ${issue.url}`.trim(),
     assigneeAgentId: decision.lead.agentId,
     originKind: ORIGIN_KIND,
     originId: issue.id,
   });
-  await ctx.state.set(sessionKey(sessionId), {
+  const link: SessionLink = {
     companyId,
     linearIssueId,
     delegatedBy,
     status: "routed",
     paperclipIssueId: task.id,
     lead: decision.name,
-  } satisfies SessionLink);
+  };
+  await ctx.state.set(sessionKey(sessionId), link);
   await ctx.state.set(taskKey(task.id), sessionId);
-  await ctx.issues.requestWakeup(task.id, companyId, {
-    reason: "Delegated in Linear",
-    idempotencyKey: `linear-session:${sessionId}`,
-  });
+  await wakeLead(ctx, companyId, sessionId, link, Date.now(), `linear-session:${sessionId}`);
   await linear.postActivity(sessionId, "thought", `Queued in Paperclip for the ${decision.name} lead.`);
   await ctx.state.set(lastActivityKey(sessionId), Date.now());
   return "routed";
+}
+
+/**
+ * Wake the task's lead agent. Record the wake on the session link only when
+ * the server queued it, so that reconcile retries a refused wake. Each caller
+ * passes its own idempotency key: the server may keep the key of a refused wake.
+ */
+export async function wakeLead(
+  ctx: PluginContext,
+  companyId: string,
+  sessionId: string,
+  link: SessionLink,
+  now: number,
+  idempotencyKey: string,
+): Promise<boolean> {
+  const { queued } = await ctx.issues.requestWakeup(link.paperclipIssueId!, companyId, {
+    reason: "Delegated in Linear",
+    idempotencyKey,
+  });
+  if (queued) await ctx.state.set(sessionKey(sessionId), { ...link, wokenAt: new Date(now).toISOString() } satisfies SessionLink);
+  return queued;
 }
 
 function hash(text: string): string {

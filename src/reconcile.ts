@@ -1,6 +1,6 @@
 import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
-import { ORIGIN_KIND, sessionKey, taskKey, type SessionLink } from "./intake.js";
+import { ORIGIN_KIND, sessionKey, taskKey, wakeLead, type SessionLink } from "./intake.js";
 import type { LinearApi } from "./linear/api.js";
 import { commentOutbound, doneOutbound, lastActivityKey, outboundKey } from "./status.js";
 
@@ -18,6 +18,7 @@ export interface ReconcileReport {
   commentsReplayed: number;
   doneReported: number;
   keptAlive: number;
+  woken: number;
   errors: number;
 }
 
@@ -25,7 +26,8 @@ export interface ReconcileReport {
  * Bring one company's linked tasks back in line with Linear. Plugin events
  * arrive at most once, so this job replays what was missed: agent comments
  * and completion reports. It also cancels Paperclip tasks whose Linear issue
- * was canceled, and keeps sessions with work in progress from going stale.
+ * was canceled, wakes routed tasks whose first wake failed, and keeps
+ * sessions with work in progress from going stale.
  */
 export async function reconcileCompany(
   ctx: PluginContext,
@@ -34,7 +36,7 @@ export async function reconcileCompany(
   config: LinearConfig,
   now: number,
 ): Promise<ReconcileReport> {
-  const report: ReconcileReport = { checked: 0, cancelled: 0, commentsReplayed: 0, doneReported: 0, keptAlive: 0, errors: 0 };
+  const report: ReconcileReport = { checked: 0, cancelled: 0, commentsReplayed: 0, doneReported: 0, keptAlive: 0, woken: 0, errors: 0 };
   const act = config.mode === "act";
   const tasks = await ctx.issues.list({ companyId, originKind: ORIGIN_KIND });
   for (const task of tasks) {
@@ -51,6 +53,22 @@ export async function reconcileCompany(
           await linear.postActivity(sessionId, "response", "The Linear issue was canceled, so the Paperclip task was cancelled.");
         }
         report.cancelled++;
+        continue;
+      }
+
+      // A routed task whose wake was never queued: intake's wake failed, or an
+      // earlier repair failed half-way. A task that the owner moved to backlog
+      // after the wake has `wokenAt`, so it stays where the owner put it.
+      if ((task.status === "backlog" || task.status === "todo") && link.status === "routed" && !link.wokenAt) {
+        if (act) {
+          if (task.status === "backlog") await ctx.issues.update(task.id, { status: "todo" }, companyId);
+          const queued = await wakeLead(ctx, companyId, sessionId, link, now, `linear-session:${sessionId}:reconcile:${now}`);
+          if (queued) {
+            await linear.postActivity(sessionId, "thought", `Queued in Paperclip for the ${link.lead} lead.`);
+            await ctx.state.set(lastActivityKey(sessionId), now);
+          }
+        }
+        report.woken++;
         continue;
       }
 

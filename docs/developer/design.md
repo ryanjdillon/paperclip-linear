@@ -34,7 +34,8 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   id, verifies the signature and timestamp, records the `Linear-Delivery` id
   to drop duplicates, then handles agent session events inline: an
   acknowledgement first, then one issue read, routing, the Paperclip task, and
-  a wakeup. Linear expects an answer within 5 seconds and a first activity
+  a wakeup. The task is created as `todo`: Paperclip defaults to `backlog`,
+  and it refuses to wake an agent on a backlog issue. Linear expects an answer within 5 seconds and a first activity
   within 10; if that proves too slow, the read and task creation move to a
   job.
 - **Event handlers.** Turn Paperclip events into Linear activities and state
@@ -42,8 +43,11 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 - **Reconcile job.** Plugin events arrive at most once, so every 5 minutes the
   job walks each configured company's linked tasks (found by origin, since
   jobs carry no company and plugin state cannot be listed). It cancels tasks
-  whose Linear issue was canceled, replays agent comments and completions with
-  no outbound record, and posts a keep-alive thought when a task in progress
+  whose Linear issue was canceled, and retries the wake of a routed task in
+  `backlog` or `todo` that has no queued wake on record. Each retry uses a new
+  idempotency key, because the server may keep the key of a refused wake. It
+  replays agent
+  comments and completions with no outbound record, and posts a keep-alive thought when a task in progress
   has been quiet for 20 minutes.
 - **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
   authenticated with a client-credentials token of the same Linear app, so
