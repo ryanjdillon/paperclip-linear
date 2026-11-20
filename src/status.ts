@@ -60,8 +60,16 @@ export async function readActivity(ctx: PluginContext, sessionId: string): Promi
  * one team; an issue in another team keeps its state, and the skip is logged.
  */
 export async function moveIssue(ctx: PluginContext, linear: LinearApi, linearIssueId: string, stateId: string) {
-  if (!(await linear.setIssueState(linearIssueId, stateId))) {
-    ctx.logger.info("Linear issue is not in the team of the configured state; state not moved", { linearIssueId, stateId });
+  const move = await linear.setIssueState(linearIssueId, stateId);
+  if (move.reason === "other-team") {
+    ctx.logger.info("Linear issue is not in the team of the configured state; state not moved", {
+      linearIssueId,
+      stateId,
+      issueTeamId: move.issueTeamId,
+      stateTeamId: move.stateTeamId,
+    });
+  } else if (move.reason === "missing") {
+    ctx.logger.info("Linear gave no team for the issue or the configured state; state not moved", { linearIssueId, stateId });
   }
 }
 

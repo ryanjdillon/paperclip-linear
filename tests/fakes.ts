@@ -26,12 +26,13 @@ export const stateTeamId = "team-1";
 
 /**
  * A fake Linear: mints tokens, answers the issue query, records every write.
- * The issue is in `stateTeamId` unless `teamId` says otherwise.
+ * The issue is in `stateTeamId` unless `teamId` says otherwise; null gives no team.
  */
-export function fakeLinear(issue: { labels: string[]; projectId: string | null; stateType?: string; teamId?: string }) {
+export function fakeLinear(issue: { labels: string[]; projectId: string | null; stateType?: string; teamId?: string | null }) {
   const activities: Array<{ type: string; body: string }> = [];
   const urls: Array<{ label: string; url: string }> = [];
   const stateMoves: Array<{ id: string; stateId: string }> = [];
+  const teamQueries: Array<{ issue: string; state: string }> = [];
   let tokens = 0;
   const fetch: Fetch = async (url, init) => {
     if (url === LINEAR_TOKEN_URL) {
@@ -42,7 +43,7 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null; 
     expect(url).toBe(LINEAR_GRAPHQL_URL);
     const { query, variables } = JSON.parse(init.body) as {
       query: string;
-      variables: { id?: string; input?: { content?: { type: string; body: string }; addedExternalUrls?: typeof urls; stateId?: string } };
+      variables: { id?: string; issue?: string; state?: string; input?: { content?: { type: string; body: string }; addedExternalUrls?: typeof urls; stateId?: string } };
     };
     const ok = (data: unknown) => ({ status: 200, ok: true, json: async () => ({ data }) });
     if (query.includes("agentActivityCreate")) {
@@ -58,7 +59,9 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null; 
       return ok({ issueUpdate: { success: true } });
     }
     if (query.includes("StateTeams")) {
-      return ok({ issue: { team: { id: issue.teamId ?? stateTeamId } }, workflowState: { team: { id: stateTeamId } } });
+      teamQueries.push({ issue: variables.issue!, state: variables.state! });
+      const team = issue.teamId === null ? null : { id: issue.teamId ?? stateTeamId };
+      return ok({ issue: { team }, workflowState: { team: { id: stateTeamId } } });
     }
     if (query.includes("IssueState")) return ok({ issue: { state: { type: issue.stateType ?? "started" } } });
     return ok({
@@ -79,6 +82,7 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null; 
     activities,
     urls,
     stateMoves,
+    teamQueries,
     tokenCount: () => tokens,
     api: new LinearApi(fetch, new AppTokenSource(fetch, "client-1", "secret")),
   };

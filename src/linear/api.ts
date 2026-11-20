@@ -111,9 +111,10 @@ export class LinearApi {
 
   /**
    * Move an issue to a workflow state. A state belongs to one team, so the
-   * move is skipped when the issue is in another team. Returns whether it moved.
+   * move is skipped when the issue is in another team, sub-teams included, or
+   * when Linear gives no team for the issue or the state.
    */
-  async setIssueState(issueId: string, stateId: string): Promise<boolean> {
+  async setIssueState(issueId: string, stateId: string): Promise<StateMove> {
     const teams = await this.graphql<{
       issue: { team?: { id: string } | null } | null;
       workflowState: { team?: { id: string } | null } | null;
@@ -121,13 +122,15 @@ export class LinearApi {
       `query StateTeams($issue: String!, $state: String!) { issue(id: $issue) { team { id } } workflowState(id: $state) { team { id } } }`,
       { issue: issueId, state: stateId },
     );
-    const issueTeam = teams.issue?.team?.id;
-    if (!issueTeam || issueTeam !== teams.workflowState?.team?.id) return false;
+    const issueTeamId = teams.issue?.team?.id;
+    const stateTeamId = teams.workflowState?.team?.id;
+    if (!issueTeamId || !stateTeamId) return { reason: "missing" };
+    if (issueTeamId !== stateTeamId) return { reason: "other-team", issueTeamId, stateTeamId };
     await this.graphql(
       `mutation SetState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`,
       { id: issueId, input: { stateId } },
     );
-    return true;
+    return { reason: "moved" };
   }
 
   /** The issue fields routing and the Paperclip task need. */
@@ -148,6 +151,12 @@ export class LinearApi {
     };
   }
 }
+
+/** The result of a state move: moved, skipped for another team, or skipped for a missing team. */
+export type StateMove =
+  | { reason: "moved" }
+  | { reason: "other-team"; issueTeamId: string; stateTeamId: string }
+  | { reason: "missing" };
 
 interface RawIssue {
   id: string;
