@@ -37,7 +37,9 @@ The lead agent may delegate further inside Paperclip.
 | The task is done | A "finished" response; the issue moves to done only if `closeOnDone` is on |
 
 Linear keeps title, description, project, priority, and labels. The plugin
-changes an issue's workflow state only to the states you configure.
+changes an issue's workflow state only to the states you configure. A state
+belongs to one Linear team. If an issue is in a different team, the plugin
+still posts the activity, but it does not change the state of that issue.
 Every 5 minutes a reconcile job cancels Paperclip tasks whose Linear issue
 was canceled, wakes agents whose first wake failed, and sends agent comments
 and completions whose events were missed.

@@ -21,8 +21,14 @@ export function config(mode: LinearConfig["mode"] = "act", extra: Partial<Linear
   };
 }
 
-/** A fake Linear: mints tokens, answers the issue query, records every write. */
-export function fakeLinear(issue: { labels: string[]; projectId: string | null; stateType?: string }) {
+/** The team of every workflow state the fake knows. */
+export const stateTeamId = "team-1";
+
+/**
+ * A fake Linear: mints tokens, answers the issue query, records every write.
+ * The issue is in `stateTeamId` unless `teamId` says otherwise.
+ */
+export function fakeLinear(issue: { labels: string[]; projectId: string | null; stateType?: string; teamId?: string }) {
   const activities: Array<{ type: string; body: string }> = [];
   const urls: Array<{ label: string; url: string }> = [];
   const stateMoves: Array<{ id: string; stateId: string }> = [];
@@ -50,6 +56,9 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null; 
     if (query.includes("issueUpdate")) {
       stateMoves.push({ id: variables.id!, stateId: variables.input!.stateId! });
       return ok({ issueUpdate: { success: true } });
+    }
+    if (query.includes("StateTeams")) {
+      return ok({ issue: { team: { id: issue.teamId ?? stateTeamId } }, workflowState: { team: { id: stateTeamId } } });
     }
     if (query.includes("IssueState")) return ok({ issue: { state: { type: issue.stateType ?? "started" } } });
     return ok({

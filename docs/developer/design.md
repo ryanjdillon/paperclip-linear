@@ -12,7 +12,10 @@ the [decision records](adr/index.md) have the choices.
 
 Paperclip writes back only agent activities, comments, external URLs (pull
 requests), and a configured set of state moves (started, in review). It moves
-an issue to done only if the configuration allows it.
+an issue to done only if the configuration allows it. A workflow state
+belongs to one team. Before each move, the plugin reads the team of the issue
+and the team of the state. If they are not the same, it skips the move and
+logs it. Thus a routed issue from another team keeps its state.
 
 ## Components
 

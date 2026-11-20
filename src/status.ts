@@ -56,6 +56,16 @@ export async function readActivity(ctx: PluginContext, sessionId: string): Promi
 }
 
 /**
+ * Move a linked issue to a configured state. The configured states belong to
+ * one team; an issue in another team keeps its state, and the skip is logged.
+ */
+export async function moveIssue(ctx: PluginContext, linear: LinearApi, linearIssueId: string, stateId: string) {
+  if (!(await linear.setIssueState(linearIssueId, stateId))) {
+    ctx.logger.info("Linear issue is not in the team of the configured state; state not moved", { linearIssueId, stateId });
+  }
+}
+
+/**
  * Report one Paperclip event on a linked task to its Linear agent session
  * (design doc, "What shows up in Linear"). Linear keeps its own fields; the
  * plugin only adds activity, links, and configured state moves.
@@ -119,7 +129,7 @@ async function planFor(
         kind: "started",
         run: async (sessionId) => {
           await post(sessionId, "thought", "Working on it in Paperclip.", true);
-          if (config.states.started) await linear.setIssueState(link.linearIssueId, config.states.started);
+          if (config.states.started) await moveIssue(ctx, linear, link.linearIssueId, config.states.started);
         },
       };
     case "agent.run.failed": {
@@ -155,15 +165,15 @@ async function planFor(
     case "issue.updated": {
       const status = (payload.status ?? (payload.changes as Record<string, unknown> | undefined)?.status) as string | undefined;
       if (status === "in_review" && config.states.inReview) {
-        return { kind: "in_review", run: () => linear.setIssueState(link.linearIssueId, config.states.inReview!) };
+        return { kind: "in_review", run: () => moveIssue(ctx, linear, link.linearIssueId, config.states.inReview!) };
       }
       if (status === "done") {
         return {
           kind: "done",
-            key: doneOutbound(taskId),
+          key: doneOutbound(taskId),
           run: async (sessionId) => {
             await post(sessionId, "response", "Finished in Paperclip.");
-            if (config.closeOnDone && config.states.done) await linear.setIssueState(link.linearIssueId, config.states.done);
+            if (config.closeOnDone && config.states.done) await moveIssue(ctx, linear, link.linearIssueId, config.states.done);
           },
         };
       }
