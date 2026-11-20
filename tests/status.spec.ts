@@ -80,6 +80,16 @@ describe("status back to Linear", () => {
     expect(linear.stateMoves).toEqual([{ id: "lin-issue-1", stateId: "st-done" }]);
   });
 
+  it("reports but does not move an issue in a team other than the configured states' team", async () => {
+    deps = await setup(config("act", { states: { started: "st-started", inReview: "st-review", done: "st-done" }, closeOnDone: true }));
+    linear.issue.teamId = "team-other";
+    expect(await handleStatusEvent(deps, event("agent.run.started", { issueId: taskId }))).toBe("reported");
+    expect(await handleStatusEvent(deps, event("issue.updated", { status: "in_review" }, { entityId: taskId }))).toBe("reported");
+    expect(await handleStatusEvent(deps, event("issue.updated", { status: "done" }, { entityId: taskId }))).toBe("reported");
+    expect(linear.activities.map((a) => a.type)).toEqual(["thought", "response"]);
+    expect(linear.stateMoves).toEqual([]);
+  });
+
   it("writes once per event, and nothing for unlinked tasks or in observe mode", async () => {
     const e = event("agent.run.failed", { issueId: taskId, error: "x" });
     expect(await handleStatusEvent(deps, e)).toBe("reported");

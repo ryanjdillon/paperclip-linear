@@ -109,12 +109,25 @@ export class LinearApi {
     return data.issue?.state?.type ?? null;
   }
 
-  /** Move an issue to a workflow state. */
-  async setIssueState(issueId: string, stateId: string): Promise<void> {
+  /**
+   * Move an issue to a workflow state. A state belongs to one team, so the
+   * move is skipped when the issue is in another team. Returns whether it moved.
+   */
+  async setIssueState(issueId: string, stateId: string): Promise<boolean> {
+    const teams = await this.graphql<{
+      issue: { team?: { id: string } | null } | null;
+      workflowState: { team?: { id: string } | null } | null;
+    }>(
+      `query StateTeams($issue: String!, $state: String!) { issue(id: $issue) { team { id } } workflowState(id: $state) { team { id } } }`,
+      { issue: issueId, state: stateId },
+    );
+    const issueTeam = teams.issue?.team?.id;
+    if (!issueTeam || issueTeam !== teams.workflowState?.team?.id) return false;
     await this.graphql(
       `mutation SetState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`,
       { id: issueId, input: { stateId } },
     );
+    return true;
   }
 
   /** The issue fields routing and the Paperclip task need. */

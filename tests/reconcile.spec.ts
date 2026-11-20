@@ -47,6 +47,15 @@ describe("reconcile", () => {
     expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now())).doneReported).toBe(0);
   });
 
+  it("reports a missed completion but does not close an issue in another team", async () => {
+    linear.issue.teamId = "team-other";
+    await harness.ctx.issues.update(taskId, { status: "done" }, companyId);
+    const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());
+    expect(report).toMatchObject({ doneReported: 1, errors: 0 });
+    expect(linear.activities).toEqual([{ type: "response", body: "Finished in Paperclip." }]);
+    expect(linear.stateMoves).toEqual([]);
+  });
+
   it("cancels the Paperclip task when the Linear issue was canceled", async () => {
     linear.issue.stateType = "canceled";
     const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());

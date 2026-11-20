@@ -2,7 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
 import { ORIGIN_KIND, sessionKey, taskKey, wakeLead, type SessionLink } from "./intake.js";
 import type { LinearApi } from "./linear/api.js";
-import { commentOutbound, doneOutbound, outboundKey, readActivity, recordActivity } from "./status.js";
+import { commentOutbound, doneOutbound, moveIssue, outboundKey, readActivity, recordActivity } from "./status.js";
 
 export const RECONCILE_JOB = "reconcile";
 
@@ -104,7 +104,7 @@ export async function reconcileCompany(
             await ctx.state.set(key, { at: new Date(now).toISOString(), sessionId, replayed: true });
             await linear.postActivity(sessionId, "response", "Finished in Paperclip.");
             await recordActivity(ctx, sessionId, now, "response");
-            if (config.closeOnDone && config.states.done) await linear.setIssueState(link.linearIssueId, config.states.done);
+            if (config.closeOnDone && config.states.done) await moveIssue(ctx, linear, link.linearIssueId, config.states.done);
           }
           report.doneReported++;
         }
