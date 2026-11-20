@@ -7,7 +7,7 @@
   "license": "MIT",
   "author": "ryanjdillon",
   "repository": "github:ryanjdillon/paperclip-linear",
-  "packageManager": "pnpm@12.9.0",
+  "packageManager": "pnpm@12.20.0",
   "engines": {
     "node": ">=24.11.0"
   },
