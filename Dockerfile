@@ -4,7 +4,7 @@
 
 # The build stage runs on the build machine's own architecture: its output is
 # plain JavaScript, so the final multi-arch image needs no emulation.
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:0998f9a7af5bba96fb32e2aeafde650a625012cb194a57e7f3939bf3e592721f AS build
+FROM --platform=$BUILDPLATFORM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS build
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
