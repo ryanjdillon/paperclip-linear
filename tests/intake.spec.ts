@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, type SessionLink } from "../src/intake.js";
 import { AppTokenSource, LinearApi, LINEAR_TOKEN_URL, type Fetch } from "../src/linear/api.js";
 import { companyId, config, created, fakeLinear } from "./fakes.js";
 import manifest from "../src/manifest.js";
-import { readActivity } from "../src/status.js";
+import { readActivity, recordActivity } from "../src/status.js";
 
 describe("agent session intake", () => {
   let harness: ReturnType<typeof createTestHarness>;
@@ -52,6 +52,7 @@ describe("agent session intake", () => {
     const labelled = fakeLinear({ labels: ["lead:delivery"], projectId: null });
     const prompted = { action: "prompted", agentSession: created.agentSession, agentActivity: { body: "Added the label" } };
     expect(await handleAgentSessionEvent({ ...deps, linear: labelled.api }, prompted)).toBe("routed");
+    expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("thought");
   });
 
   it("forwards a follow-up prompt to the linked task", async () => {
@@ -64,6 +65,17 @@ describe("agent session intake", () => {
     const comments = await harness.ctx.issues.listComments(link.paperclipIssueId!, companyId);
     expect(comments.at(-1)?.body).toContain("Use the new palette");
     expect(linear.activities.at(-1)).toMatchObject({ type: "thought" });
+    expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("thought");
+  });
+
+  it("records the end of a question before the forward, which may fail", async () => {
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" });
+    const deps = { ctx: harness.ctx, linear: linear.api, companyId, config: config() };
+    await handleAgentSessionEvent(deps, created);
+    await recordActivity(harness.ctx, "sess-1", 0, "elicitation");
+    vi.spyOn(harness.ctx.issues, "createComment").mockRejectedValueOnce(new Error("host unavailable"));
+    const prompted = { action: "prompted", agentSession: created.agentSession, agentActivity: { body: "Approved" } };
+    await expect(handleAgentSessionEvent(deps, prompted)).rejects.toThrow();
     expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("thought");
   });
 
