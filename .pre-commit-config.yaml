@@ -16,6 +16,6 @@ repos:
         pass_filenames: false
         files: \.(ts|tsx)$
   - repo: https://github.com/ryanjdillon/workflows
-    rev: f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # frozen: v1.0.0
+    rev: 5a8a9389d9ff1826df8b4ab8d8a0cce3936693a4 # frozen: v1.2.0
     hooks:
       - id: check-instructions
