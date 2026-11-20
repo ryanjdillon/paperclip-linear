@@ -83,7 +83,6 @@ export async function handleStatusEvent(deps: StatusDeps, event: PluginEvent): P
   if ((await ctx.state.get(key)) !== null) return "duplicate";
   await ctx.state.set(key, { at: event.occurredAt, sessionId });
   await plan.run(sessionId);
-  if (plan.activity) await recordActivity(ctx, sessionId, Date.parse(event.occurredAt) || Date.now(), plan.activity);
   return "reported";
 }
 
@@ -91,8 +90,6 @@ interface Plan {
   kind: string;
   /** A stable key the reconcile job can check; defaults to the event id and kind. */
   key?: string;
-  /** The activity type the plan posts to the session, if it posts one. */
-  activity?: ActivityType;
   run(sessionId: string): Promise<void>;
 }
 
@@ -108,14 +105,19 @@ async function planFor(
   link: SessionLink,
 ): Promise<Plan | null> {
   const { ctx, linear, config } = deps;
+  // Record each post as soon as it is made: a later step can fail, and the
+  // event is not retried once its outbound key is set.
+  const post = async (sessionId: string, type: ActivityType, body: string, ephemeral?: boolean) => {
+    await linear.postActivity(sessionId, type, body, ephemeral);
+    await recordActivity(ctx, sessionId, Date.parse(event.occurredAt) || Date.now(), type);
+  };
   const taskLink = deps.paperclipUrl ? ` ${deps.paperclipUrl.replace(/\/$/, "")}/issues/${taskId}` : "";
   switch (event.eventType) {
     case "agent.run.started":
       return {
         kind: "started",
-        activity: "thought",
         run: async (sessionId) => {
-          await linear.postActivity(sessionId, "thought", "Working on it in Paperclip.", true);
+          await post(sessionId, "thought", "Working on it in Paperclip.", true);
           if (config.states.started) await linear.setIssueState(link.linearIssueId, config.states.started);
         },
       };
@@ -123,8 +125,7 @@ async function planFor(
       const reason = (payload.error as string | null) ?? (payload.errorCode as string | null) ?? "unknown error";
       return {
         kind: "failed",
-        activity: "error",
-        run: (sessionId) => linear.postActivity(sessionId, "error", `The Paperclip run failed: ${reason}.${taskLink}`),
+        run: (sessionId) => post(sessionId, "error", `The Paperclip run failed: ${reason}.${taskLink}`),
       };
     }
     case "issue.comment.created": {
@@ -138,10 +139,9 @@ async function planFor(
       const urls = [...new Set(comment.body.match(PR_URL) ?? [])];
       return {
         kind: "comment",
-        activity: "response",
         key: commentOutbound(comment.id),
         run: async (sessionId) => {
-          await linear.postActivity(sessionId, "response", comment.body);
+          await post(sessionId, "response", comment.body);
           if (urls.length > 0) await linear.addExternalUrls(sessionId, urls.map((url) => ({ label: "Pull request", url })));
         },
       };
@@ -149,9 +149,7 @@ async function planFor(
     case "approval.created":
       return {
         kind: "approval",
-        activity: "elicitation",
-        run: (sessionId) =>
-          linear.postActivity(sessionId, "elicitation", `An approval is waiting in Paperclip before work continues.${taskLink}`),
+        run: (sessionId) => post(sessionId, "elicitation", `An approval is waiting in Paperclip before work continues.${taskLink}`),
       };
     case "issue.updated": {
       const status = (payload.status ?? (payload.changes as Record<string, unknown> | undefined)?.status) as string | undefined;
@@ -161,10 +159,9 @@ async function planFor(
       if (status === "done") {
         return {
           kind: "done",
-          activity: "response",
-          key: doneOutbound(taskId),
+            key: doneOutbound(taskId),
           run: async (sessionId) => {
-            await linear.postActivity(sessionId, "response", "Finished in Paperclip.");
+            await post(sessionId, "response", "Finished in Paperclip.");
             if (config.closeOnDone && config.states.done) await linear.setIssueState(link.linearIssueId, config.states.done);
           },
         };

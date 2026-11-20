@@ -108,13 +108,11 @@ export async function reconcileCompany(
           }
           report.doneReported++;
         }
-      } else if (task.status in KEEP_ALIVE_TEXT) {
+      } else if (Object.hasOwn(KEEP_ALIVE_TEXT, task.status)) {
         const last = await readActivity(ctx, sessionId);
-        // A question to the owner keeps its session in "Needs input" without
-        // help, and a thought would replace that state. The same holds for the
-        // agent's answer on a task in review: the session waits for the owner.
-        const waitsForOwner =
-          last?.type === "elicitation" || (task.status === "in_review" && last?.type === "response");
+        // A question to the owner keeps its session in "Needs input" with no
+        // help (probed), and a thought may replace that state.
+        const waitsForOwner = last?.type === "elicitation";
         if (!waitsForOwner && (last === null || now - last.at > KEEP_ALIVE_AFTER_MS)) {
           if (act) {
             await linear.postActivity(sessionId, "thought", KEEP_ALIVE_TEXT[task.status], true);

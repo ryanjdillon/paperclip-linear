@@ -74,15 +74,15 @@ export async function handleAgentSessionEvent(deps: IntakeDeps, payload: AgentSe
     if (link.status === "awaiting_route") return routeSession(deps, sessionId, linearIssueId, link.delegatedBy);
     const body = payload.agentActivity?.body ?? payload.agentActivity?.content?.body ?? "";
     if (deps.config.mode === "observe") return "observed";
+    // The reply ends a question. Record a thought first, so that reconcile keeps
+    // the session alive again even if the forward below fails.
+    await deps.linear.postActivity(sessionId, "thought", "Passed to the Paperclip agent.", true);
+    await recordActivity(deps.ctx, sessionId, Date.now(), "thought");
     await deps.ctx.issues.createComment(link.paperclipIssueId!, `From Linear:\n\n${body}`, deps.companyId);
     await deps.ctx.issues.requestWakeup(link.paperclipIssueId!, deps.companyId, {
       reason: "Follow-up in Linear",
       idempotencyKey: `linear-prompt:${sessionId}:${body.length}:${hash(body)}`,
     });
-    // The reply ends a question; record a thought so that reconcile keeps the
-    // session alive again.
-    await deps.linear.postActivity(sessionId, "thought", "Passed to the Paperclip agent.", true);
-    await recordActivity(deps.ctx, sessionId, Date.now(), "thought");
     return "prompt_forwarded";
   }
   if (payload.action !== "created") return "ignored";
@@ -100,7 +100,10 @@ async function routeSession(
   const { ctx, linear, companyId, config } = deps;
   const observe = config.mode === "observe";
   // Linear marks a session unresponsive without an activity within 10 seconds.
-  if (!observe) await linear.postActivity(sessionId, "thought", "Received. Routing to a Paperclip agent.", true);
+  if (!observe) {
+    await linear.postActivity(sessionId, "thought", "Received. Routing to a Paperclip agent.", true);
+    await recordActivity(ctx, sessionId, Date.now(), "thought");
+  }
 
   const issue = await linear.issue(linearIssueId);
   const decision = route(issue, config.routing);

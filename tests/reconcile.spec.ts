@@ -159,10 +159,47 @@ describe("reconcile", () => {
       expect(linear.activities).toEqual([]);
     });
 
-    it("leaves a task in review after the agent's answer", async () => {
+    it("keeps a task in review alive after the agent's answer", async () => {
       const now = Date.now();
       await quietFor("in_review", "response", now - quiet);
-      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(0);
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(1);
+    });
+
+    it.each([
+      ["the agent's run starts", "agent.run.started"],
+      ["the agent answers", "issue.comment.created"],
+    ])("resumes the keep-alive after a question when %s", async (_, eventType) => {
+      await harness.ctx.issues.update(taskId, { status: "in_progress" }, companyId);
+      await recordActivity(harness.ctx, "sess-1", 0, "elicitation");
+      if (eventType === "issue.comment.created") {
+        await harness.ctx.issues.createComment(taskId, "Approved, carrying on", companyId, { authorAgentId: "agent-delivery" });
+      }
+      const at = Date.parse("2026-11-11T12:00:00Z");
+      await handleStatusEvent(
+        { ctx: harness.ctx, linear: linear.api, config: cfg },
+        { eventId: `evt-${eventType}`, eventType, occurredAt: new Date(at).toISOString(), companyId, actorType: "agent", entityId: taskId, payload: { issueId: taskId } } as never,
+      );
+      expect((await readActivity(harness.ctx, "sess-1"))?.type).not.toBe("elicitation");
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, at + quiet)).keptAlive).toBe(1);
+    });
+
+    it("records a post even when a later step of the same event fails", async () => {
+      await recordActivity(harness.ctx, "sess-1", 0, "elicitation");
+      vi.spyOn(linear.api, "setIssueState").mockRejectedValueOnce(new Error("Linear unavailable"));
+      await expect(
+        handleStatusEvent(
+          { ctx: harness.ctx, linear: linear.api, config: config("act", { states: { started: "st-started" } }) },
+          { eventId: "evt-start-fail", eventType: "agent.run.started", occurredAt: new Date().toISOString(), companyId, payload: { issueId: taskId } } as never,
+        ),
+      ).rejects.toThrow();
+      expect((await readActivity(harness.ctx, "sess-1"))?.type).toBe("thought");
+    });
+
+    it("keeps alive a session with a time-only record from an older version", async () => {
+      const now = Date.now();
+      await harness.ctx.issues.update(taskId, { status: "todo" }, companyId);
+      await harness.ctx.state.set(lastActivityKey("sess-1"), now - quiet);
+      expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).keptAlive).toBe(1);
     });
 
     it("keeps working after an answer while the task is still in progress", async () => {
