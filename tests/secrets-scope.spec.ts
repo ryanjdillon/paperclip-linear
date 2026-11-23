@@ -12,7 +12,7 @@ const webhookSecret = "whsec_test";
 const clientSecret = "client-secret";
 
 /**
- * Paperclip 2026.1106.0 runs webhooks and jobs outside any company invocation,
+ * Paperclip (checked in 2026.1117.0) runs webhooks and jobs outside any company invocation,
  * so `secrets.resolve` is refused ("company context is required") unless the
  * call names the company. This fake host enforces the same rule.
  */
