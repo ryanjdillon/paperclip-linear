@@ -4,7 +4,7 @@ import { configSchema } from "./config.js";
 const manifest: PaperclipPluginManifestV1 = {
   id: "ryanjdillon.paperclip-linear",
   apiVersion: 1,
-  version: "0.1.4",
+  version: "0.1.5",
   displayName: "Linear",
   description: "Makes Linear the source of truth for work Paperclip agents do",
   author: "ryanjdillon",
