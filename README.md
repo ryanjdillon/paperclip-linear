@@ -32,8 +32,8 @@ official Paperclip image with the plugin baked in (see
 [setup](docs/user/setup.md)). Pull requests that touch the image only build it.
 
 To try it locally, run the published Paperclip release the SDK is pinned to
-(`npx paperclipai@2026.1106.0 run`) and install this folder from its absolute
-path: `npx paperclipai@2026.1106.0 plugin install /path/to/paperclip-linear`.
+(`npx paperclipai@2026.1117.0 run`) and install this folder from its absolute
+path: `npx paperclipai@2026.1117.0 plugin install /path/to/paperclip-linear`.
 Local installs run trusted code from this folder. A Paperclip source checkout
 installed with a newer pnpm skips the release's dependency patches, so do not
 run the server from one.
