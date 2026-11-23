@@ -13,9 +13,9 @@ COPY esbuild.config.mjs tsconfig.json ./
 COPY src ./src
 RUN pnpm build
 
-FROM ghcr.io/paperclipai/paperclip:2026.1106.0@sha256:d6584f05cf57a4b26c117eb083725f18c1fe69ddafa7d16c9f8cce83f6fa17da
+FROM ghcr.io/paperclipai/paperclip:2026.1117.0@sha256:bdf38d10544dc6c831e16dc027f23ad586353ef3be1a1b2c6979e63b956aceb1
 LABEL org.opencontainers.image.source="https://github.com/ryanjdillon/paperclip-linear" \
-      org.opencontainers.image.description="Paperclip 2026.1106.0 with the paperclip-linear plugin" \
+      org.opencontainers.image.description="Paperclip 2026.1117.0 with the paperclip-linear plugin" \
       org.opencontainers.image.licenses="MIT"
 # The worker bundle is self-contained, so the plugin needs only its manifest
 # package and dist/. Root-owned and read-only to the runtime user.
