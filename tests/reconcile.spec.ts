@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
-import { handleAgentSessionEvent, sessionKey, type SessionLink } from "../src/intake.js";
+import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, type SessionLink } from "../src/intake.js";
 import manifest from "../src/manifest.js";
-import { KEEP_ALIVE_AFTER_MS, reconcileCompany } from "../src/reconcile.js";
+import { KEEP_ALIVE_AFTER_MS, RECOVER_GRACE_MS, RECOVER_LIMIT, RECOVER_WINDOW_MS, reconcileCompany } from "../src/reconcile.js";
 import { handleStatusEvent, lastActivityKey, readActivity, recordActivity } from "../src/status.js";
-import { companyId, config, created, fakeLinear } from "./fakes.js";
+import { appSession, companyId, config, created, fakeLinear } from "./fakes.js";
 
 describe("reconcile", () => {
   let harness: ReturnType<typeof createTestHarness>;
@@ -229,5 +229,120 @@ describe("reconcile", () => {
     const report = await reconcileCompany(harness.ctx, linear.api, companyId, config("observe"), Date.now());
     expect(report.doneReported).toBe(1);
     expect(linear.activities).toEqual([]);
+  });
+
+  it("does not recover a session whose delivery was handled", async () => {
+    linear.sessions.push(appSession("sess-1", Date.now(), 10 * 60 * 1000));
+    const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());
+    expect(report).toMatchObject({ recovered: 0, superseded: 0, errors: 0 });
+    expect(linear.activities).toEqual([]);
+  });
+
+  it("does not recover a lost session when the issue already has an open task", async () => {
+    // The owner delegated the issue again, and that delivery was routed.
+    linear.sessions.push(appSession("sess-lost", Date.now(), 10 * 60 * 1000));
+    const report = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now());
+    expect(report).toMatchObject({ recovered: 0, superseded: 1 });
+    expect(harness.getState(sessionKey("sess-lost"))).toBeUndefined();
+    expect(await harness.ctx.issues.list({ companyId, originKind: ORIGIN_KIND })).toHaveLength(1);
+  });
+});
+
+describe("reconcile recovers lost agent sessions", () => {
+  const cfg = config();
+  const minutes = (n: number) => n * 60 * 1000;
+  let harness: ReturnType<typeof createTestHarness>;
+
+  beforeEach(() => {
+    harness = createTestHarness({ manifest });
+  });
+
+  const tasks = () => harness.ctx.issues.list({ companyId, originKind: ORIGIN_KIND });
+
+  it("runs intake for a session whose created delivery was lost, once", async () => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-lost", now, minutes(10))]);
+
+    const first = await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now);
+    expect(first).toMatchObject({ recovered: 1, errors: 0 });
+    const [task] = await tasks();
+    expect(task).toMatchObject({ assigneeAgentId: "agent-delivery", originId: "lin-issue-1", status: "todo" });
+    expect(harness.getState(sessionKey("sess-lost"))).toMatchObject({ status: "routed", paperclipIssueId: task.id, delegatedBy: "user-ryan" });
+    expect((harness.getState(sessionKey("sess-lost")) as SessionLink).wokenAt).toBeDefined();
+    expect(linear.activities.map((a) => a.type)).toEqual(["thought", "thought"]);
+    expect(harness.logs).toContainEqual(
+      expect.objectContaining({ level: "info", meta: expect.objectContaining({ sessionId: "sess-lost", outcome: "recovered", intake: "routed" }) }),
+    );
+
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now + minutes(5))).recovered).toBe(0);
+    expect(await tasks()).toHaveLength(1);
+  });
+
+  it("treats a late delivery for a recovered session as a duplicate", async () => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-1", now, minutes(10))]);
+    await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now);
+    expect(await handleAgentSessionEvent({ ctx: harness.ctx, linear: linear.api, companyId, config: cfg }, created)).toBe("duplicate_session");
+    expect(await tasks()).toHaveLength(1);
+  });
+
+  it("creates one task when the delivery arrives while reconcile recovers the session", async () => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-1", now, minutes(10))]);
+    const deps = { ctx: harness.ctx, linear: linear.api, companyId, config: cfg };
+    const [report, outcome] = await Promise.all([
+      reconcileCompany(harness.ctx, linear.api, companyId, cfg, now),
+      handleAgentSessionEvent(deps, created),
+    ]);
+    expect(await tasks()).toHaveLength(1);
+    expect(report.recovered + (outcome === "routed" ? 1 : 0)).toBe(1);
+  });
+
+  it("asks which lead for a recovered session that matches no route", async () => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: null }, [appSession("sess-lost", now, minutes(10))]);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(1);
+    expect((harness.getState(sessionKey("sess-lost")) as SessionLink).status).toBe("awaiting_route");
+    expect(linear.activities.at(-1)).toMatchObject({ type: "elicitation" });
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now + minutes(5))).recovered).toBe(0);
+  });
+
+  it.each([
+    ["a session of another app", (now: number) => appSession("s", now, minutes(10), { appUser: { id: "other-app" } })],
+    ["a dismissed session", (now: number) => appSession("s", now, minutes(10), { dismissedAt: new Date(now).toISOString() })],
+    ["a session with no issue", (now: number) => appSession("s", now, minutes(10), { issue: null })],
+    ["a session whose delivery can still arrive", (now: number) => appSession("s", now, RECOVER_GRACE_MS - 1)],
+    ["a session older than the window", (now: number) => appSession("s", now, RECOVER_WINDOW_MS + 1)],
+  ])("does not recover %s", async (_, session) => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [session(now)]);
+    expect(await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).toMatchObject({ recovered: 0, errors: 0 });
+    expect(await tasks()).toEqual([]);
+    expect(linear.activities).toEqual([]);
+  });
+
+  it("recovers at most the limit in one run, and the rest in the next", async () => {
+    const now = Date.now();
+    const sessions = Array.from({ length: RECOVER_LIMIT + 2 }, (_, i) =>
+      appSession(`sess-${i}`, now, minutes(10 + i), { issue: { id: `lin-issue-${i}` } }),
+    );
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, sessions);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(RECOVER_LIMIT);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(2);
+  });
+
+  it("writes nothing in observe mode but reports the session", async () => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-lost", now, minutes(10))]);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, config("observe"), now)).recovered).toBe(1);
+    expect(await tasks()).toEqual([]);
+    expect(linear.activities).toEqual([]);
+    expect(harness.getState(sessionKey("sess-lost"))).toBeUndefined();
+  });
+
+  it("counts an error when Linear cannot list the sessions", async () => {
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" });
+    vi.spyOn(linear.api, "appAgentSessions").mockRejectedValueOnce(new Error("Linear unavailable"));
+    expect(await reconcileCompany(harness.ctx, linear.api, companyId, cfg, Date.now())).toMatchObject({ recovered: 0, errors: 1 });
   });
 });

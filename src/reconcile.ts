@@ -1,6 +1,6 @@
 import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
-import { ORIGIN_KIND, sessionKey, taskKey, wakeLead, type SessionLink } from "./intake.js";
+import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, taskKey, wakeLead, type SessionLink } from "./intake.js";
 import type { LinearApi } from "./linear/api.js";
 import { commentOutbound, doneOutbound, moveIssue, outboundKey, readActivity, recordActivity } from "./status.js";
 
@@ -8,6 +8,15 @@ export const RECONCILE_JOB = "reconcile";
 
 /** Linear marks a session stale after about 30 minutes without activity. */
 export const KEEP_ALIVE_AFTER_MS = 20 * 60 * 1000;
+
+/** Recover only sessions created within this time; older ones are a person's to look at. */
+export const RECOVER_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Leave a session this young to its webhook delivery, which can still be on its way. */
+export const RECOVER_GRACE_MS = 2 * 60 * 1000;
+/** The most sessions one run recovers for one company. */
+export const RECOVER_LIMIT = 10;
+/** How many of the app's newest sessions one run reads. */
+export const RECOVER_PAGE = 50;
 
 /**
  * The keep-alive text for each open task status. Work that waits keeps its
@@ -31,6 +40,8 @@ export interface ReconcileReport {
   doneReported: number;
   keptAlive: number;
   woken: number;
+  recovered: number;
+  superseded: number;
   errors: number;
 }
 
@@ -40,6 +51,8 @@ export interface ReconcileReport {
  * and completion reports. It also cancels Paperclip tasks whose Linear issue
  * was canceled, wakes routed tasks whose first wake failed, and keeps the
  * sessions of open tasks from going stale, except where a question waits.
+ * Last, it runs intake for the app's agent sessions that have no link: their
+ * `created` delivery did not arrive or failed (DIL-992).
  */
 export async function reconcileCompany(
   ctx: PluginContext,
@@ -48,7 +61,17 @@ export async function reconcileCompany(
   config: LinearConfig,
   now: number,
 ): Promise<ReconcileReport> {
-  const report: ReconcileReport = { checked: 0, cancelled: 0, commentsReplayed: 0, doneReported: 0, keptAlive: 0, woken: 0, errors: 0 };
+  const report: ReconcileReport = {
+    checked: 0,
+    cancelled: 0,
+    commentsReplayed: 0,
+    doneReported: 0,
+    keptAlive: 0,
+    woken: 0,
+    recovered: 0,
+    superseded: 0,
+    errors: 0,
+  };
   const act = config.mode === "act";
   const tasks = await ctx.issues.list({ companyId, originKind: ORIGIN_KIND });
   for (const task of tasks) {
@@ -126,5 +149,61 @@ export async function reconcileCompany(
       ctx.logger.error("Reconcile failed for a linked task", { companyId, taskId: task.id, error: String(error) });
     }
   }
+  await recoverSessions(ctx, linear, companyId, config, now, tasks, report);
   return report;
+}
+
+/**
+ * Run intake for the app's recent agent sessions that have no session link.
+ * Intake is the same as for a `created` delivery, with the same session link
+ * check, so a late delivery for a recovered session is a duplicate, and a
+ * recovered session whose delivery was already handled is skipped. A session
+ * is skipped when an open Paperclip task already exists for its Linear issue:
+ * a later delegation of the same issue was routed.
+ */
+async function recoverSessions(
+  ctx: PluginContext,
+  linear: LinearApi,
+  companyId: string,
+  config: LinearConfig,
+  now: number,
+  tasks: Array<{ status: string; originId?: string | null }>,
+  report: ReconcileReport,
+): Promise<void> {
+  let sessions;
+  try {
+    sessions = await linear.appAgentSessions(RECOVER_PAGE);
+  } catch (error) {
+    report.errors++;
+    ctx.logger.error("Reconcile could not list Linear agent sessions", { companyId, error: String(error) });
+    return;
+  }
+  const openIssues = new Set(
+    tasks.filter((t) => t.status !== "done" && t.status !== "cancelled" && t.originId).map((t) => t.originId!),
+  );
+  for (const session of sessions) {
+    if (report.recovered >= RECOVER_LIMIT) break;
+    const age = now - session.createdAt;
+    // Sessions come newest first, so the rest are older still.
+    if (age > RECOVER_WINDOW_MS) break;
+    if (!(age >= RECOVER_GRACE_MS) || session.dismissed || !session.issueId) continue;
+    if (await ctx.state.get(sessionKey(session.id))) continue;
+    if (openIssues.has(session.issueId)) {
+      report.superseded++;
+      continue;
+    }
+    try {
+      const intake = await handleAgentSessionEvent(
+        { ctx, linear, companyId, config },
+        { action: "created", agentSession: { id: session.id, issueId: session.issueId, creatorId: session.creatorId ?? undefined } },
+      );
+      if (intake === "duplicate_session") continue;
+      report.recovered++;
+      openIssues.add(session.issueId);
+      ctx.logger.info("Recovered a Linear agent session", { companyId, sessionId: session.id, outcome: "recovered", intake });
+    } catch (error) {
+      report.errors++;
+      ctx.logger.error("Reconcile failed to recover a Linear agent session", { companyId, sessionId: session.id, error: String(error) });
+    }
+  }
 }

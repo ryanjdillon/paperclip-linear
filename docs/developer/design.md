@@ -67,6 +67,26 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   replace that state (not probed). Each post is recorded with its type as soon
   as it is made, because a later step of the same event can fail and the
   event is not retried.
+- **Session recovery.** A `created` delivery can be lost before it reaches
+  the plugin, and Linear does not always send it again (DIL-992: the client
+  closed the connection after 31 ms, and no retry came). The reconcile job
+  therefore also reads the app's 50 newest agent sessions with
+  `agentSessions(first: 50, orderBy: createdAt)` and `viewer { id }`.
+  `agentSessions` has no filter argument (Linear's
+  [GraphQL schema](https://github.com/linear/linear/blob/2ca00918e3ae699a0aa1a6b07330b433397cd201/packages/sdk/src/schema.graphql)),
+  so the plugin keeps only sessions whose `appUser` is the viewer. It runs the
+  `created` intake for each session that has no session link, at most 10 for
+  each company in one run. It skips a session that is younger than 2 minutes,
+  because its delivery can still arrive. It skips a session that is older
+  than 24 hours, a dismissed session, and a session with no issue. It also
+  skips a session whose Linear issue already has an open Paperclip task,
+  because a later delegation of that issue was routed. Intake records the
+  session link, so a late delivery for a recovered session is a duplicate.
+  The webhook and the job run in one worker. Intake claims the session in
+  memory before its first await and reads the link again inside the claim,
+  so two calls at the same time create one task. Each recovered session gets
+  one log line with `outcome: "recovered"`. In observe mode intake writes no
+  link, so the job reports the same session again in each run for 24 hours.
 - **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
   authenticated with a client-credentials token of the same Linear app, so
   their writes also appear as the app (ADR 0007). A scheduled job rotates the
