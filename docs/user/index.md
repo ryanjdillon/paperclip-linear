@@ -42,7 +42,9 @@ belongs to one Linear team. If an issue is in a different team, the plugin
 still posts the activity, but it does not change the state of that issue.
 Every 5 minutes a reconcile job cancels Paperclip tasks whose Linear issue
 was canceled, wakes agents whose first wake failed, and sends agent comments
-and completions whose events were missed.
+and completions whose events were missed. It also starts work on an issue
+that you delegated in the last 24 hours if its delivery from Linear did not
+arrive. Work then starts up to 7 minutes after the delegation.
 
 Work that waits for you never times out. A question to you (which lead, or an
 approval) stays in "Needs input" until you reply, and the plugin never posts

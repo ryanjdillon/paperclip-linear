@@ -89,10 +89,23 @@ export async function handleAgentSessionEvent(deps: IntakeDeps, payload: AgentSe
     return "prompt_forwarded";
   }
   if (payload.action !== "created") return "ignored";
-  if (link) return "duplicate_session";
-  const delegatedBy = session?.creatorId ?? session?.creator?.id ?? null;
-  return routeSession(deps, sessionId, linearIssueId, delegatedBy);
+  if (link || inIntake.has(sessionId)) return "duplicate_session";
+  // Claim the session before the next await. The webhook and the reconcile
+  // job can both start intake for one session; both run in this worker, so
+  // only one passes this point. Read the link again inside the claim: the
+  // other caller can have finished after the first read.
+  inIntake.add(sessionId);
+  try {
+    if (await deps.ctx.state.get(sessionKey(sessionId))) return "duplicate_session";
+    const delegatedBy = session?.creatorId ?? session?.creator?.id ?? null;
+    return await routeSession(deps, sessionId, linearIssueId, delegatedBy);
+  } finally {
+    inIntake.delete(sessionId);
+  }
 }
+
+/** Agent sessions that a `created` intake routes now, in this worker. */
+const inIntake = new Set<string>();
 
 async function routeSession(
   deps: IntakeDeps,

@@ -24,11 +24,40 @@ export function config(mode: LinearConfig["mode"] = "act", extra: Partial<Linear
 /** The team of every workflow state the fake knows. */
 export const stateTeamId = "team-1";
 
+/** The fake Linear's app user, the viewer of its app token. */
+export const appUserId = "app-user-1";
+
+/** An agent session as the fake's `agentSessions` query returns it. */
+export interface FakeSession {
+  id: string;
+  createdAt: string;
+  dismissedAt?: string | null;
+  appUser: { id: string };
+  creator?: { id: string } | null;
+  issue?: { id: string } | null;
+}
+
+/** A session of the fake's app on its issue, created `ageMs` before `now`. */
+export function appSession(id: string, now: number, ageMs: number, extra: Partial<FakeSession> = {}): FakeSession {
+  return {
+    id,
+    createdAt: new Date(now - ageMs).toISOString(),
+    appUser: { id: appUserId },
+    creator: { id: "user-ryan" },
+    issue: { id: "lin-issue-1" },
+    ...extra,
+  };
+}
+
 /**
  * A fake Linear: mints tokens, answers the issue query, records every write.
  * The issue is in `stateTeamId` unless `teamId` says otherwise; null gives no team.
+ * `sessions` answers the agent sessions query, newest first.
  */
-export function fakeLinear(issue: { labels: string[]; projectId: string | null; stateType?: string; teamId?: string | null }) {
+export function fakeLinear(
+  issue: { labels: string[]; projectId: string | null; stateType?: string; teamId?: string | null },
+  sessions: FakeSession[] = [],
+) {
   const activities: Array<{ type: string; body: string }> = [];
   const urls: Array<{ label: string; url: string }> = [];
   const stateMoves: Array<{ id: string; stateId: string }> = [];
@@ -46,6 +75,7 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null; 
       variables: { id?: string; issue?: string; state?: string; input?: { content?: { type: string; body: string }; addedExternalUrls?: typeof urls; stateId?: string } };
     };
     const ok = (data: unknown) => ({ status: 200, ok: true, json: async () => ({ data }) });
+    if (query.includes("AppAgentSessions")) return ok({ viewer: { id: appUserId }, agentSessions: { nodes: sessions } });
     if (query.includes("agentActivityCreate")) {
       activities.push(variables.input!.content!);
       return ok({ agentActivityCreate: { success: true } });
@@ -78,6 +108,7 @@ export function fakeLinear(issue: { labels: string[]; projectId: string | null; 
   };
   return {
     issue,
+    sessions,
     fetch,
     activities,
     urls,

@@ -133,6 +133,27 @@ export class LinearApi {
     return { reason: "moved" };
   }
 
+  /**
+   * The app's newest agent sessions, newest first. `agentSessions` has no
+   * filter argument and can return sessions of other apps, so the result keeps
+   * only sessions whose app user is the token's viewer (the app user).
+   */
+  async appAgentSessions(first: number): Promise<AppAgentSession[]> {
+    const data = await this.graphql<{ viewer: { id: string }; agentSessions: { nodes: RawAgentSession[] } }>(
+      `query AppAgentSessions($first: Int!) { viewer { id } agentSessions(first: $first, orderBy: createdAt) { nodes { id createdAt dismissedAt appUser { id } creator { id } issue { id } } } }`,
+      { first },
+    );
+    return data.agentSessions.nodes
+      .filter((n) => n.appUser?.id === data.viewer.id)
+      .map((n) => ({
+        id: n.id,
+        createdAt: Date.parse(n.createdAt),
+        dismissed: n.dismissedAt != null,
+        creatorId: n.creator?.id ?? null,
+        issueId: n.issue?.id ?? null,
+      }));
+  }
+
   /** The issue fields routing and the Paperclip task need. */
   async issue(id: string): Promise<LinearIssue> {
     const data = await this.graphql<{ issue: RawIssue }>(
@@ -157,6 +178,25 @@ export type StateMove =
   | { reason: "moved" }
   | { reason: "other-team"; issueTeamId: string; stateTeamId: string }
   | { reason: "missing" };
+
+interface RawAgentSession {
+  id: string;
+  createdAt: string;
+  dismissedAt?: string | null;
+  appUser?: { id: string } | null;
+  creator?: { id: string } | null;
+  issue?: { id: string } | null;
+}
+
+/** One of the app's agent sessions, as reconcile needs it. */
+export interface AppAgentSession {
+  id: string;
+  /** Milliseconds since the epoch. */
+  createdAt: number;
+  dismissed: boolean;
+  creatorId: string | null;
+  issueId: string | null;
+}
 
 interface RawIssue {
   id: string;
