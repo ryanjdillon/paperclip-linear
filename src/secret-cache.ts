@@ -20,6 +20,8 @@ interface Entry {
  */
 export class SecretCache {
   private readonly entries = new Map<string, Entry>();
+  /** When each key was last resolved or refreshed, failed attempts included. */
+  private readonly attempts = new Map<string, number>();
 
   constructor(
     private readonly now: () => number = () => Date.now(),
@@ -36,23 +38,32 @@ export class SecretCache {
 
   /**
    * Resolve `key` again, for example after a signature mismatch from a rotated
-   * secret. Returns undefined when the last resolve is too recent; the caller
-   * then keeps its result.
+   * secret. Returns undefined when the last attempt is too recent; the caller
+   * then keeps its result. The old value stays until the new resolve
+   * succeeds. A failed attempt also counts, so a host limit does not turn
+   * each later delivery into a resolve.
    */
   async refresh(key: string, resolve: () => Promise<string>): Promise<string | undefined> {
-    const entry = this.entries.get(key);
-    if (entry && this.now() - entry.resolvedAt < this.minRefreshMs) return undefined;
-    return this.load(key, resolve);
+    const at = this.now();
+    const last = this.attempts.get(key);
+    if (last !== undefined && at - last < this.minRefreshMs) return undefined;
+    this.attempts.set(key, at);
+    const value = await resolve();
+    this.entries.set(key, { value: Promise.resolve(value), resolvedAt: at });
+    return value;
   }
 
   /** Forget every key that starts with `prefix`, for example after a config change. */
   clear(prefix = ""): void {
-    for (const key of [...this.entries.keys()]) if (key.startsWith(prefix)) this.entries.delete(key);
+    for (const map of [this.entries, this.attempts]) {
+      for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+    }
   }
 
   private load(key: string, resolve: () => Promise<string>): Promise<string> {
     const entry: Entry = { value: resolve(), resolvedAt: this.now() };
     this.entries.set(key, entry);
+    this.attempts.set(key, entry.resolvedAt);
     entry.value.catch(() => {
       if (this.entries.get(key) === entry) this.entries.delete(key);
     });
