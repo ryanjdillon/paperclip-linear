@@ -134,24 +134,31 @@ export class LinearApi {
   }
 
   /**
-   * The app's newest agent sessions, newest first. `agentSessions` has no
-   * filter argument and can return sessions of other apps, so the result keeps
-   * only sessions whose app user is the token's viewer (the app user).
+   * The app's newest agent sessions, sorted newest first. The schema says
+   * `first` gives the newest first; the sort keeps the result correct if that
+   * changes. `agentSessions` has no filter argument and can return sessions
+   * of other apps, so the result keeps only sessions whose app user is the
+   * token's viewer: with `actor=app`, the viewer is the app user.
    */
   async appAgentSessions(first: number): Promise<AppAgentSession[]> {
     const data = await this.graphql<{ viewer: { id: string }; agentSessions: { nodes: RawAgentSession[] } }>(
-      `query AppAgentSessions($first: Int!) { viewer { id } agentSessions(first: $first, orderBy: createdAt) { nodes { id createdAt dismissedAt appUser { id } creator { id } issue { id } } } }`,
+      `query AppAgentSessions($first: Int!) { viewer { id } agentSessions(first: $first, orderBy: createdAt) { nodes { id createdAt status dismissedAt appUser { id } creator { id } issue { id state { type } delegate { id } } } } }`,
       { first },
     );
+    const appUserId = data.viewer.id;
     return data.agentSessions.nodes
-      .filter((n) => n.appUser?.id === data.viewer.id)
+      .filter((n) => n.appUser?.id === appUserId)
       .map((n) => ({
         id: n.id,
         createdAt: Date.parse(n.createdAt),
+        status: n.status,
         dismissed: n.dismissedAt != null,
         creatorId: n.creator?.id ?? null,
         issueId: n.issue?.id ?? null,
-      }));
+        issueStateType: n.issue?.state?.type ?? null,
+        delegatedToApp: n.issue?.delegate?.id === appUserId,
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /** The issue fields routing and the Paperclip task need. */
@@ -182,10 +189,11 @@ export type StateMove =
 interface RawAgentSession {
   id: string;
   createdAt: string;
+  status: string;
   dismissedAt?: string | null;
   appUser?: { id: string } | null;
   creator?: { id: string } | null;
-  issue?: { id: string } | null;
+  issue?: { id: string; state?: { type?: string } | null; delegate?: { id: string } | null } | null;
 }
 
 /** One of the app's agent sessions, as reconcile needs it. */
@@ -193,9 +201,15 @@ export interface AppAgentSession {
   id: string;
   /** Milliseconds since the epoch. */
   createdAt: number;
+  /** pending, active, stopping, awaitingInput, complete, error, or stale. */
+  status: string;
   dismissed: boolean;
   creatorId: string | null;
   issueId: string | null;
+  /** The issue's workflow state type, for example completed or canceled. */
+  issueStateType: string | null;
+  /** The issue's delegate is this app. */
+  delegatedToApp: boolean;
 }
 
 interface RawIssue {

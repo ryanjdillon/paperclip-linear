@@ -1,5 +1,5 @@
 import { definePlugin, runWorker, type PluginContext, type PluginWebhookInput } from "@paperclipai/plugin-sdk";
-import { parseConfig, type LinearConfig } from "./config.js";
+import { organizationKey, parseConfig, type LinearConfig } from "./config.js";
 import { HANDLED_SESSION_ACTIONS, handleAgentSessionEvent, type AgentSessionPayload } from "./intake.js";
 import { AppTokenSource, LinearApi, type Fetch } from "./linear/api.js";
 import { COMPANIES_KEY, RECONCILE_JOB, reconcileCompany } from "./reconcile.js";
@@ -7,10 +7,7 @@ import { handleStatusEvent, STATUS_EVENTS } from "./status.js";
 import { checkDelivery, firstDelivery } from "./linear/webhook.js";
 import { SecretCache } from "./secret-cache.js";
 
-/** Instance state key mapping a Linear workspace to the Paperclip company configured for it. */
-export function organizationKey(organizationId: string) {
-  return { scopeKind: "instance", stateKey: `linear-org:${organizationId}` } as const;
-}
+export { organizationKey };
 
 /** What happened to one webhook delivery; returned for tests and logged. */
 export type WebhookOutcome =

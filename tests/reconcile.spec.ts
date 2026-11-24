@@ -4,7 +4,8 @@ import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, type SessionLink } fr
 import manifest from "../src/manifest.js";
 import { KEEP_ALIVE_AFTER_MS, RECOVER_GRACE_MS, RECOVER_LIMIT, RECOVER_WINDOW_MS, reconcileCompany } from "../src/reconcile.js";
 import { handleStatusEvent, lastActivityKey, readActivity, recordActivity } from "../src/status.js";
-import { appSession, companyId, config, created, fakeLinear } from "./fakes.js";
+import { organizationKey } from "../src/config.js";
+import { appSession, companyId, config, created, delegatedIssue, fakeLinear } from "./fakes.js";
 
 describe("reconcile", () => {
   let harness: ReturnType<typeof createTestHarness>;
@@ -15,6 +16,7 @@ describe("reconcile", () => {
   beforeEach(async () => {
     harness = createTestHarness({ manifest });
     linear = fakeLinear({ labels: [], projectId: "lin-website" });
+    await harness.ctx.state.set(organizationKey("org-1"), companyId);
     await handleAgentSessionEvent({ ctx: harness.ctx, linear: linear.api, companyId, config: cfg }, created);
     taskId = (harness.getState(sessionKey("sess-1")) as SessionLink).paperclipIssueId!;
     linear.activities.length = 0;
@@ -253,8 +255,9 @@ describe("reconcile recovers lost agent sessions", () => {
   const minutes = (n: number) => n * 60 * 1000;
   let harness: ReturnType<typeof createTestHarness>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     harness = createTestHarness({ manifest });
+    await harness.ctx.state.set(organizationKey("org-1"), companyId);
   });
 
   const tasks = () => harness.ctx.issues.list({ companyId, originKind: ORIGIN_KIND });
@@ -311,6 +314,13 @@ describe("reconcile recovers lost agent sessions", () => {
     ["a session of another app", (now: number) => appSession("s", now, minutes(10), { appUser: { id: "other-app" } })],
     ["a dismissed session", (now: number) => appSession("s", now, minutes(10), { dismissedAt: new Date(now).toISOString() })],
     ["a session with no issue", (now: number) => appSession("s", now, minutes(10), { issue: null })],
+    ["a completed session", (now: number) => appSession("s", now, minutes(10), { status: "complete" })],
+    ["a session on a canceled issue", (now: number) => appSession("s", now, minutes(10), { issue: delegatedIssue("lin-issue-1", "canceled") })],
+    ["a session on a completed issue", (now: number) => appSession("s", now, minutes(10), { issue: delegatedIssue("lin-issue-1", "completed") })],
+    [
+      "a session on an issue no longer delegated to the app",
+      (now: number) => appSession("s", now, minutes(10), { issue: { ...delegatedIssue(), delegate: null } }),
+    ],
     ["a session whose delivery can still arrive", (now: number) => appSession("s", now, RECOVER_GRACE_MS - 1)],
     ["a session older than the window", (now: number) => appSession("s", now, RECOVER_WINDOW_MS + 1)],
   ])("does not recover %s", async (_, session) => {
@@ -324,20 +334,67 @@ describe("reconcile recovers lost agent sessions", () => {
   it("recovers at most the limit in one run, and the rest in the next", async () => {
     const now = Date.now();
     const sessions = Array.from({ length: RECOVER_LIMIT + 2 }, (_, i) =>
-      appSession(`sess-${i}`, now, minutes(10 + i), { issue: { id: `lin-issue-${i}` } }),
+      appSession(`sess-${i}`, now, minutes(10 + i), { issue: delegatedIssue(`lin-issue-${i}`) }),
     );
     const linear = fakeLinear({ labels: [], projectId: "lin-website" }, sessions);
     expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(RECOVER_LIMIT);
     expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(2);
   });
 
-  it("writes nothing in observe mode but reports the session", async () => {
+  it("writes nothing in observe mode but reports the sessions, past the limit", async () => {
     const now = Date.now();
-    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-lost", now, minutes(10))]);
-    expect((await reconcileCompany(harness.ctx, linear.api, companyId, config("observe"), now)).recovered).toBe(1);
+    const sessions = Array.from({ length: RECOVER_LIMIT + 2 }, (_, i) =>
+      appSession(`sess-${i}`, now, minutes(10 + i), { issue: delegatedIssue(`lin-issue-${i}`) }),
+    );
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, sessions);
+    const report = await reconcileCompany(harness.ctx, linear.api, companyId, config("observe"), now);
+    expect(report).toMatchObject({ recovered: 0, observed: RECOVER_LIMIT + 2 });
     expect(await tasks()).toEqual([]);
     expect(linear.activities).toEqual([]);
-    expect(harness.getState(sessionKey("sess-lost"))).toBeUndefined();
+    expect(harness.getState(sessionKey("sess-0"))).toBeUndefined();
+  });
+
+  it("recovers sessions whatever order Linear returns them in", async () => {
+    const now = Date.now();
+    // Oldest first, with one outside the window first: a newest-first stop would skip the rest.
+    const sessions = [
+      appSession("sess-old", now, RECOVER_WINDOW_MS + 1, { issue: delegatedIssue("lin-issue-old") }),
+      appSession("sess-a", now, minutes(30), { issue: delegatedIssue("lin-issue-a") }),
+      appSession("sess-b", now, minutes(10), { issue: delegatedIssue("lin-issue-b") }),
+    ];
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, sessions);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(2);
+    expect(harness.getState(sessionKey("sess-a"))).toBeDefined();
+    expect(harness.getState(sessionKey("sess-b"))).toBeDefined();
+    expect(harness.getState(sessionKey("sess-old"))).toBeUndefined();
+  });
+
+  it.each(["stale", "error"])("recovers a %s session, as Linear marks a session that got no activity", async (status) => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-lost", now, minutes(10), { status })]);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(1);
+  });
+
+  it("retries a session in the next run when Linear rejects the first activity", async () => {
+    const now = Date.now();
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-lost", now, minutes(10))]);
+    vi.spyOn(linear.api, "postActivity").mockRejectedValueOnce(new Error("Linear unavailable"));
+    expect(await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).toMatchObject({ recovered: 0, errors: 1 });
+    expect(harness.logs).toContainEqual(
+      expect.objectContaining({ level: "error", meta: expect.objectContaining({ sessionId: "sess-lost", ageMs: minutes(10) }) }),
+    );
+    expect(await tasks()).toEqual([]);
+
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now + minutes(5))).recovered).toBe(1);
+    expect(await tasks()).toHaveLength(1);
+  });
+
+  it("recovers only for the company the webhook maps the Linear workspace to", async () => {
+    const now = Date.now();
+    await harness.ctx.state.set(organizationKey("org-1"), "company-other");
+    const linear = fakeLinear({ labels: [], projectId: "lin-website" }, [appSession("sess-lost", now, minutes(10))]);
+    expect((await reconcileCompany(harness.ctx, linear.api, companyId, cfg, now)).recovered).toBe(0);
+    expect(await tasks()).toEqual([]);
   });
 
   it("counts an error when Linear cannot list the sessions", async () => {

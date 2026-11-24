@@ -125,3 +125,8 @@ export function parseConfig(raw: Record<string, unknown>): { config: LinearConfi
     },
   };
 }
+
+/** Instance state key mapping a Linear workspace to the Paperclip company configured for it. */
+export function organizationKey(organizationId: string) {
+  return { scopeKind: "instance", stateKey: `linear-org:${organizationId}` } as const;
+}
