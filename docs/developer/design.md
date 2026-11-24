@@ -88,11 +88,14 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   link, at most 10 for each company in one run. It skips these sessions:
   - younger than 2 minutes, because the delivery can still arrive;
   - older than 24 hours, dismissed, or with no issue;
-  - with the status `complete` or `stopping`;
+  - with the status `complete` or `stopping` (`AgentSessionStatus` in the
+    schema has `stopping`; the developer docs list six states without it);
   - on an issue that is completed or canceled, or that is no longer
     delegated to the app;
   - on an issue that already has an open Paperclip task, because a later
-    delegation of that issue was routed (logged at debug level).
+    delegation of that issue was routed, or that has a session waiting for
+    the owner to name a lead, so the owner gets one question (logged at debug
+    level).
 
   The job keeps sessions with the status `pending`, `error`, or `stale`.
   Linear marks a session unresponsive when it gets no activity within 10
@@ -102,7 +105,12 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 
   Only the company that the webhook maps the Linear workspace to
   (`linear-org:<id>`, set from the config) recovers sessions, so two
-  companies on one workspace do not both start work.
+  companies on one workspace do not both start work. The other companies log
+  this at debug level.
+
+  When a recovery fails after the acknowledgement thought, the next run
+  retries it. The session then has an activity record and no link, so the
+  retry does not post the acknowledgement again.
 
   Intake records the session link, so a late delivery for a recovered session
   is a duplicate. Paperclip runs each plugin in one worker process that talks
@@ -123,8 +131,8 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
 
   Each recovered session gets one log line with `outcome: "recovered"` and
   its age; a failure logs the age too. In observe mode intake writes no link.
-  The job counts such sessions as `observed`, not against the limit of 10,
-  and reports them again in each run for 24 hours.
+  The job counts such sessions as `observed`, with their own limit of 10 for
+  each run, and reports them again in each run for 24 hours.
 - **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
   authenticated with a client-credentials token of the same Linear app, so
   their writes also appear as the app (ADR 0007). A scheduled job rotates the
