@@ -31,10 +31,16 @@ export const appUserId = "app-user-1";
 export interface FakeSession {
   id: string;
   createdAt: string;
+  status: string;
   dismissedAt?: string | null;
   appUser: { id: string };
   creator?: { id: string } | null;
-  issue?: { id: string } | null;
+  issue?: { id: string; state?: { type: string } | null; delegate?: { id: string } | null } | null;
+}
+
+/** An issue delegated to the fake's app, in a backlog state. */
+export function delegatedIssue(id = "lin-issue-1", stateType = "backlog") {
+  return { id, state: { type: stateType }, delegate: { id: appUserId } };
 }
 
 /** A session of the fake's app on its issue, created `ageMs` before `now`. */
@@ -42,9 +48,10 @@ export function appSession(id: string, now: number, ageMs: number, extra: Partia
   return {
     id,
     createdAt: new Date(now - ageMs).toISOString(),
+    status: "pending",
     appUser: { id: appUserId },
     creator: { id: "user-ryan" },
-    issue: { id: "lin-issue-1" },
+    issue: delegatedIssue(),
     ...extra,
   };
 }
@@ -52,7 +59,7 @@ export function appSession(id: string, now: number, ageMs: number, extra: Partia
 /**
  * A fake Linear: mints tokens, answers the issue query, records every write.
  * The issue is in `stateTeamId` unless `teamId` says otherwise; null gives no team.
- * `sessions` answers the agent sessions query, newest first.
+ * `sessions` answers the agent sessions query, in the given order.
  */
 export function fakeLinear(
   issue: { labels: string[]; projectId: string | null; stateType?: string; teamId?: string | null },

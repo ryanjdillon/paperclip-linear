@@ -71,22 +71,60 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   the plugin, and Linear does not always send it again (DIL-992: the client
   closed the connection after 31 ms, and no retry came). The reconcile job
   therefore also reads the app's 50 newest agent sessions with
-  `agentSessions(first: 50, orderBy: createdAt)` and `viewer { id }`.
-  `agentSessions` has no filter argument (Linear's
-  [GraphQL schema](https://github.com/linear/linear/blob/2ca00918e3ae699a0aa1a6b07330b433397cd201/packages/sdk/src/schema.graphql)),
-  so the plugin keeps only sessions whose `appUser` is the viewer. It runs the
-  `created` intake for each session that has no session link, at most 10 for
-  each company in one run. It skips a session that is younger than 2 minutes,
-  because its delivery can still arrive. It skips a session that is older
-  than 24 hours, a dismissed session, and a session with no issue. It also
-  skips a session whose Linear issue already has an open Paperclip task,
-  because a later delegation of that issue was routed. Intake records the
-  session link, so a late delivery for a recovered session is a duplicate.
-  The webhook and the job run in one worker. Intake claims the session in
-  memory before its first await and reads the link again inside the claim,
-  so two calls at the same time create one task. Each recovered session gets
-  one log line with `outcome: "recovered"`. In observe mode intake writes no
-  link, so the job reports the same session again in each run for 24 hours.
+  `agentSessions(first: 50, orderBy: createdAt)` and `viewer { id }`. These
+  facts come from Linear's
+  [GraphQL schema](https://github.com/linear/linear/blob/2ca00918e3ae699a0aa1a6b07330b433397cd201/packages/sdk/src/schema.graphql) at
+  that commit:
+  - `agentSessions` has no filter argument, so the plugin keeps only
+    sessions whose `appUser` is the viewer.
+  - `viewer` is "the account making this request. For OAuth applications
+    using actor=app, this is the application account." The plugin's token
+    is a client-credentials token with the app actor (ADR 0007).
+  - With `first`, "results are newest first". The plugin also sorts the
+    sessions newest first and checks the age of each session, so it does not
+    depend on that order.
+
+  The job runs the `created` intake for each session that has no session
+  link, at most 10 for each company in one run. It skips these sessions:
+  - younger than 2 minutes, because the delivery can still arrive;
+  - older than 24 hours, dismissed, or with no issue;
+  - with the status `complete` or `stopping`;
+  - on an issue that is completed or canceled, or that is no longer
+    delegated to the app;
+  - on an issue that already has an open Paperclip task, because a later
+    delegation of that issue was routed (logged at debug level).
+
+  The job keeps sessions with the status `pending`, `error`, or `stale`.
+  Linear marks a session unresponsive when it gets no activity within 10
+  seconds of `created`, and a lost delivery always causes that. The
+  [developer docs](https://linear.app/developers/agent-interaction) do not
+  say which status that is.
+
+  Only the company that the webhook maps the Linear workspace to
+  (`linear-org:<id>`, set from the config) recovers sessions, so two
+  companies on one workspace do not both start work.
+
+  Intake records the session link, so a late delivery for a recovered session
+  is a duplicate. Paperclip runs each plugin in one worker process that talks
+  JSON-RPC to the host (SDK `protocol.d.ts`, "Process Model"), and the webhook
+  and the job both run in it. Intake marks the session in memory before its
+  first await and reads the link again after the mark, so two calls at the
+  same time create one task. The mark does not cover two worker processes at
+  the same time, for example if a restart overlaps the old and the new
+  worker. Then a second task is possible only if a delivery and a recovery
+  start inside the same few seconds, after the 2-minute grace period.
+
+  The mark is released when intake ends. Intake cannot pass an
+  `AbortSignal` to Linear: `ctx.http.fetch` sends only the method, headers,
+  and body to the host. Every call from the worker to the host, `http.fetch`
+  and the issue and state calls included, fails after 30 seconds
+  (`DEFAULT_RPC_TIMEOUT_MS` in the SDK's `worker-rpc-host.js`). So a hung
+  call holds the mark for at most 30 seconds.
+
+  Each recovered session gets one log line with `outcome: "recovered"` and
+  its age; a failure logs the age too. In observe mode intake writes no link.
+  The job counts such sessions as `observed`, not against the limit of 10,
+  and reports them again in each run for 24 hours.
 - **Agents in Linear.** Agents use Paperclip's built-in Linear connection,
   authenticated with a client-credentials token of the same Linear app, so
   their writes also appear as the app (ADR 0007). A scheduled job rotates the
