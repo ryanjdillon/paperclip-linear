@@ -10,7 +10,9 @@ Create an OAuth application (Linear → Settings → API → OAuth applications)
 - Turn on client credentials, so agents can use an app token (ADR 0007).
 - Webhooks: agent session events, issues, and comments, sent to
   `https://<paperclip host>/api/plugins/ryanjdillon.paperclip-linear/webhooks/linear`.
-  Paperclip must be reachable from the internet at that address.
+  Paperclip must be reachable from the internet at that address. The plugin
+  acts only on agent session events today. It answers issue and comment
+  events at once and does nothing with them.
 
 Keep the client id, client secret, and webhook signing secret in Paperclip's
 secret store.
