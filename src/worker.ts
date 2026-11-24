@@ -55,7 +55,9 @@ function hostFetch(context: PluginContext): Fetch {
 /**
  * True for the deliveries the plugin acts on. The type and action are read
  * before the signature check. A forged value can only make the plugin skip a
- * delivery, and a skipped delivery has no effect.
+ * delivery, and a skipped delivery has no effect. A new handler, such as the
+ * comment import (DIL-990), must add its type and actions here, or the
+ * webhook never gives it a delivery.
  */
 export function isHandledDelivery(body: unknown): boolean {
   const { type, action } = (body ?? {}) as { type?: unknown; action?: unknown };
