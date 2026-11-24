@@ -44,7 +44,9 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   acknowledgement first, then one issue read, routing, the Paperclip task, and
   a wakeup. The signing secret stays in the worker for 5 minutes. A
   signature mismatch resolves it again, at most once in 10 seconds, so a
-  rotated secret still works. The task is created as `todo`: Paperclip
+  rotated secret still works. A mismatch inside those 10 seconds, or after a
+  failed resolve, gets a 502 with no resolve, so Linear sends the delivery
+  again later. The task is created as `todo`: Paperclip
   defaults to `backlog`, and it refuses to wake an agent on a backlog issue.
   Linear expects an answer within 5 seconds and a first activity within 10.
   The SDK awaits the handler before the host answers, so the handler cannot
