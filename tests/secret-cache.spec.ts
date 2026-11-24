@@ -56,6 +56,22 @@ describe("SecretCache", () => {
     expect(source.calls()).toBe(2);
   });
 
+  it("keeps the old value and counts the attempt when a refresh fails", async () => {
+    let t = 0;
+    const cache = new SecretCache(() => t);
+    let calls = 0;
+    const failing = async () => {
+      calls++;
+      throw new Error("Rate limit exceeded for secret resolution");
+    };
+    await cache.get("k", async () => "good");
+    t = MIN_REFRESH_INTERVAL_MS;
+    await expect(cache.refresh("k", failing)).rejects.toThrow("Rate limit");
+    expect(await cache.get("k", failing)).toBe("good");
+    expect(await cache.refresh("k", failing)).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
   it("forgets the keys of one company", async () => {
     const cache = new SecretCache();
     const source = counter(["a", "b", "c"]);

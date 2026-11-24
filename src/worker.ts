@@ -67,10 +67,11 @@ export function isHandledDelivery(body: unknown): boolean {
  * answer at once. The host limits secret resolves to 30 a minute for each
  * company, and a burst of issue or comment events used up that limit.
  * Webhooks carry no Paperclip company, so the Linear workspace id in the
- * payload selects the company. Never throws for a
- * bad delivery: a 502 would make Linear retry something that will never pass.
- * A host failure before the delivery id is recorded (for example the host's
- * secret-resolve rate limit) does throw, so Linear retries it.
+ * payload selects the company. Never throws for a delivery that is surely
+ * bad: a 502 would make Linear retry something that will never pass. It
+ * throws, so Linear retries, for a host failure before the delivery id is
+ * recorded (for example the host's secret-resolve limit). It also throws for
+ * a signature mismatch that it cannot check against a fresh secret yet.
  */
 export async function handleLinearWebhook(
   context: PluginContext,
@@ -98,8 +99,19 @@ export async function handleLinearWebhook(
   let check = checkDelivery(input, await webhookSecrets.get(secretKey, resolve), now);
   if (!check.ok && check.reason === "bad_signature") {
     // The secret may have been rotated in place behind the same ref.
-    const fresh = await webhookSecrets.refresh(secretKey, resolve);
-    if (fresh !== undefined) check = checkDelivery(input, fresh, now);
+    let fresh: string | undefined;
+    try {
+      fresh = await webhookSecrets.refresh(secretKey, resolve);
+    } catch (error) {
+      context.logger.warn("Could not resolve the webhook secret again", { companyId, error: String(error) });
+    }
+    if (fresh === undefined) {
+      // The cached secret can be old, so the delivery can be real. A 502 makes
+      // Linear send it again later; a 200 would lose a new session. This path
+      // resolves nothing, so forged deliveries cannot use up the host limit.
+      throw new Error("Linear signature mismatch; the webhook secret cannot be checked again yet");
+    }
+    check = checkDelivery(input, fresh, now);
   }
   if (!check.ok) {
     context.logger.warn("Rejected a Linear delivery", { companyId, reason: check.reason });

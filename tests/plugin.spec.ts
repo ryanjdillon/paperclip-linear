@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import manifest from "../src/manifest.js";
 import { COMPANIES_KEY } from "../src/reconcile.js";
@@ -69,9 +69,16 @@ describe("Linear webhook handling", () => {
     expect(await handleLinearWebhook(harness.ctx, delivery(body), now)).toBe("duplicate");
   });
 
-  it("rejects a forged signature without throwing", async () => {
+  it("rejects a forged signature once it has checked a fresh secret", async () => {
     const body = { organizationId: orgId, ...session, webhookTimestamp: now };
-    expect(await handleLinearWebhook(harness.ctx, delivery(body, "d-2", "wrong"), now)).toBe("rejected");
+    vi.useFakeTimers({ now: Date.now(), toFake: ["Date"] });
+    try {
+      await handleLinearWebhook(harness.ctx, delivery(body, "d-1"), now);
+      vi.setSystemTime(Date.now() + MIN_REFRESH_INTERVAL_MS);
+      expect(await handleLinearWebhook(harness.ctx, delivery(body, "d-2", "wrong"), now)).toBe("rejected");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores deliveries for a workspace no company is configured for", async () => {
@@ -115,28 +122,66 @@ describe("Linear webhook handling", () => {
     expect(resolves).toBe(1);
   });
 
-  it("accepts deliveries signed with a rotated secret and limits re-resolves for forgeries", async () => {
-    let current = "old-secret";
-    let resolves = 0;
-    harness.ctx.secrets.resolve = async () => {
-      resolves++;
-      return current;
-    };
+  describe("with a secret that changes", () => {
+    let current: string;
+    let resolves: number;
+    let fail: boolean;
     const body = { organizationId: orgId, ...session, webhookTimestamp: now };
-    expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-1", "old-secret"), now)).toBe("accepted");
-    current = "new-secret";
-    // The cache still holds the old value; the mismatch forces one re-resolve.
-    vi.useFakeTimers({ now: Date.now() + MIN_REFRESH_INTERVAL_MS, toFake: ["Date"] });
-    try {
+
+    beforeEach(() => {
+      current = "old-secret";
+      resolves = 0;
+      fail = false;
+      harness.ctx.secrets.resolve = async () => {
+        resolves++;
+        if (fail) throw new Error("Rate limit exceeded for secret resolution");
+        return current;
+      };
+      vi.useFakeTimers({ now: Date.now(), toFake: ["Date"] });
+    });
+
+    afterEach(() => vi.useRealTimers());
+
+    it("accepts a delivery signed with a rotated secret", async () => {
+      expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-1", "old-secret"), now)).toBe("accepted");
+      current = "new-secret";
+      vi.setSystemTime(Date.now() + MIN_REFRESH_INTERVAL_MS);
+      // The cache still holds the old value; the mismatch forces one re-resolve.
       expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-2", "new-secret"), now)).toBe("accepted");
       expect(resolves).toBe(2);
+    });
+
+    it("answers 502 without a resolve when the secret was checked too recently", async () => {
+      expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-1", "old-secret"), now)).toBe("accepted");
+      current = "new-secret";
+      // A real delivery signed with the rotated secret: Linear must send it again.
+      await expect(handleLinearWebhook(harness.ctx, delivery(body, "r-2", "new-secret"), now)).rejects.toThrow(
+        "signature mismatch",
+      );
+      expect(harness.getState({ scopeKind: "instance", stateKey: "linear-delivery:r-2" })).toBeUndefined();
       for (let i = 0; i < 20; i++) {
-        expect(await handleLinearWebhook(harness.ctx, delivery(body, `f-${i}`, "forged"), now)).toBe("rejected");
+        await expect(handleLinearWebhook(harness.ctx, delivery(body, `f-${i}`, "forged"), now)).rejects.toThrow();
+      }
+      expect(resolves).toBe(1);
+      vi.setSystemTime(Date.now() + MIN_REFRESH_INTERVAL_MS);
+      expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-2", "new-secret"), now)).toBe("accepted");
+      expect(resolves).toBe(2);
+    });
+
+    it("keeps the cached secret and limits resolves after a failed refresh", async () => {
+      expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-1", "old-secret"), now)).toBe("accepted");
+      vi.setSystemTime(Date.now() + MIN_REFRESH_INTERVAL_MS);
+      fail = true;
+      for (let i = 0; i < 20; i++) {
+        await expect(handleLinearWebhook(harness.ctx, delivery(body, `f-${i}`, "forged"), now)).rejects.toThrow(
+          "signature mismatch",
+        );
       }
       expect(resolves).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+      // The good secret is still cached, so real deliveries need no resolve.
+      expect(await handleLinearWebhook(harness.ctx, delivery(body, "r-2", "old-secret"), now)).toBe("accepted");
+      expect(resolves).toBe(2);
+    });
   });
 
   it("ignores other endpoints", async () => {
