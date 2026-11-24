@@ -37,7 +37,7 @@ The image also holds the SSH sandbox provider at
 It is not part of this plugin. Install it from that path in the same way
 only if you use sandbox environments over SSH.
 
-Then set its configuration for the company:
+Then set the paperclip-linear configuration for the company:
 
 | Field | Meaning |
 | --- | --- |
