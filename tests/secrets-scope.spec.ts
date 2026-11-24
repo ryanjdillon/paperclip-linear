@@ -54,7 +54,7 @@ describe("secret resolution names the company", () => {
     const now = Date.now();
     const outcome = await handleLinearWebhook(
       harness.ctx,
-      signedDelivery({ type: "Issue", organizationId: "org-1" }, now),
+      signedDelivery({ type: "AgentSessionEvent", action: "created", organizationId: "org-1" }, now),
       now,
       fakeLinear({ labels: [], projectId: null }).fetch,
     );

@@ -17,6 +17,8 @@ const config = {
   routing: { leads: { delivery: { paperclipProjectId: "p1", agentId: "a1" } }, projects: { "lin-p1": "delivery" } },
 };
 const now = 1_762_000_000_000;
+/** An agent session event the plugin acts on. */
+const session = { type: "AgentSessionEvent", action: "created" };
 
 /** The test harness resolves a secret ref to `resolved:<ref>`. */
 const harnessSecret = `resolved:${String(secretRef)}`;
@@ -60,19 +62,40 @@ describe("Linear webhook handling", () => {
   });
 
   it("accepts a signed delivery once and drops the retry", async () => {
-    const body = { organizationId: orgId, type: "AgentSessionEvent", webhookTimestamp: now };
+    const body = { organizationId: orgId, ...session, webhookTimestamp: now };
     expect(await handleLinearWebhook(harness.ctx, delivery(body), now)).toBe("accepted");
     expect(await handleLinearWebhook(harness.ctx, delivery(body), now)).toBe("duplicate");
   });
 
   it("rejects a forged signature without throwing", async () => {
-    const body = { organizationId: orgId, webhookTimestamp: now };
+    const body = { organizationId: orgId, ...session, webhookTimestamp: now };
     expect(await handleLinearWebhook(harness.ctx, delivery(body, "d-2", "wrong"), now)).toBe("rejected");
   });
 
   it("ignores deliveries for a workspace no company is configured for", async () => {
-    const body = { organizationId: "someone-else", webhookTimestamp: now };
+    const body = { organizationId: "someone-else", ...session, webhookTimestamp: now };
     expect(await handleLinearWebhook(harness.ctx, delivery(body), now)).toBe("unknown_organization");
+  });
+
+  it("ignores issue and comment deliveries without resolving the secret", async () => {
+    let resolves = 0;
+    const resolve = harness.ctx.secrets.resolve;
+    harness.ctx.secrets.resolve = async (...args) => {
+      resolves++;
+      return resolve(...args);
+    };
+    const bodies = [
+      { type: "Issue", action: "remove" },
+      { type: "Comment", action: "create" },
+      { type: "AgentSessionEvent", action: "unknown" },
+      { action: "created" },
+    ];
+    for (const [i, body] of bodies.entries()) {
+      const d = delivery({ organizationId: orgId, ...body, webhookTimestamp: now }, `d-${i}`);
+      expect(await handleLinearWebhook(harness.ctx, d, now)).toBe("ignored_type");
+      expect(harness.getState({ scopeKind: "instance", stateKey: `linear-delivery:d-${i}` })).toBeUndefined();
+    }
+    expect(resolves).toBe(0);
   });
 
   it("ignores other endpoints", async () => {

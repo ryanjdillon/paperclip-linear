@@ -37,6 +37,9 @@ export type IntakeOutcome =
   | "prompt_forwarded"
   | "prompt_unlinked";
 
+/** The agent session actions intake acts on; the webhook ignores every other delivery. */
+export const HANDLED_SESSION_ACTIONS: readonly string[] = ["created", "prompted"];
+
 export interface AgentSessionPayload {
   type?: unknown;
   action?: string;
