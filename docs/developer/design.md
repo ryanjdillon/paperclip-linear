@@ -33,14 +33,23 @@ Linear ──webhook──► plugin worker ──► Paperclip issues, wakeups
   plugin mints its own client-credentials token from the app's client id and
   secret, keeps it until a day before it expires, and replaces it after a
   401.
-- **Webhook handler.** Finds the company from the payload's Linear workspace
-  id, verifies the signature and timestamp, records the `Linear-Delivery` id
-  to drop duplicates, then handles agent session events inline: an
+- **Webhook handler.** First reads the delivery's type and action. It
+  answers every delivery that is not an agent session `created` or
+  `prompted` event at once, and does nothing else for it. Paperclip allows
+  30 secret resolves a minute for each company and plugin, and bursts of
+  issue and comment events used up that limit (DIL-865). For an agent
+  session event, the handler finds the company from the payload's Linear
+  workspace id, verifies the signature and timestamp, records the
+  `Linear-Delivery` id to drop duplicates, then handles the event inline: an
   acknowledgement first, then one issue read, routing, the Paperclip task, and
-  a wakeup. The task is created as `todo`: Paperclip defaults to `backlog`,
-  and it refuses to wake an agent on a backlog issue. Linear expects an answer within 5 seconds and a first activity
-  within 10; if that proves too slow, the read and task creation move to a
-  job.
+  a wakeup. The signing secret stays in the worker for 5 minutes. A
+  signature mismatch resolves it again, at most once in 10 seconds, so a
+  rotated secret still works. The task is created as `todo`: Paperclip
+  defaults to `backlog`, and it refuses to wake an agent on a backlog issue.
+  Linear expects an answer within 5 seconds and a first activity within 10.
+  The SDK awaits the handler before the host answers, so the handler cannot
+  answer first; a test keeps a routed intake under half that limit. If that
+  proves too slow, the read and task creation move to a job.
 - **Event handlers.** Turn Paperclip events into Linear activities and state
   moves (table in [user docs](../user/index.md#what-shows-up-in-linear)).
 - **Reconcile job.** Plugin events arrive at most once, so every 5 minutes the
