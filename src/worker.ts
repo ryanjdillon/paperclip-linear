@@ -5,6 +5,7 @@ import { AppTokenSource, LinearApi, type Fetch } from "./linear/api.js";
 import { COMPANIES_KEY, RECONCILE_JOB, reconcileCompany } from "./reconcile.js";
 import { handleStatusEvent, STATUS_EVENTS } from "./status.js";
 import { checkDelivery, firstDelivery } from "./linear/webhook.js";
+import { SecretCache } from "./secret-cache.js";
 
 /** Instance state key mapping a Linear workspace to the Paperclip company configured for it. */
 export function organizationKey(organizationId: string) {
@@ -38,6 +39,13 @@ async function linearFor(context: PluginContext, companyId: string, config: Line
   }
   return new LinearApi(fetch, tokens);
 }
+
+/**
+ * Webhook signing secrets for each company. Without the cache, every agent
+ * session delivery resolves the secret, and a burst goes past the host's
+ * limit of 30 resolves a minute.
+ */
+export const webhookSecrets = new SecretCache();
 
 /** Route outbound calls through the host so they are traced and capability-checked. */
 function hostFetch(context: PluginContext): Fetch {
@@ -84,8 +92,15 @@ export async function handleLinearWebhook(
     context.logger.warn("Linear plugin is not configured for this company", { companyId, problems: parsed.problems });
     return "not_configured";
   }
-  const secret = await context.secrets.resolve(parsed.config.webhookSecret, { companyId, configPath: "webhookSecret" });
-  const check = checkDelivery(input, secret, now);
+  const ref = parsed.config.webhookSecret;
+  const secretKey = `${companyId}:${ref.secretId}:${ref.version ?? "latest"}`;
+  const resolve = () => context.secrets.resolve(ref, { companyId, configPath: "webhookSecret" });
+  let check = checkDelivery(input, await webhookSecrets.get(secretKey, resolve), now);
+  if (!check.ok && check.reason === "bad_signature") {
+    // The secret may have been rotated in place behind the same ref.
+    const fresh = await webhookSecrets.refresh(secretKey, resolve);
+    if (fresh !== undefined) check = checkDelivery(input, fresh, now);
+  }
   if (!check.ok) {
     context.logger.warn("Rejected a Linear delivery", { companyId, reason: check.reason });
     return "rejected";
@@ -152,6 +167,7 @@ const plugin = definePlugin({
     // A changed config may point a secret at another ref; drop cached token
     // sources so the next mint resolves the new one.
     for (const key of [...tokenSources.keys()]) if (key.startsWith(`${change.companyId}:`)) tokenSources.delete(key);
+    webhookSecrets.clear(`${change.companyId}:`);
     const parsed = parseConfig(newConfig);
     if ("config" in parsed) {
       await ctx.state.set(organizationKey(parsed.config.linearOrganizationId), change.companyId);

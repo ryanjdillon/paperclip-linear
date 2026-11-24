@@ -5,7 +5,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import manifest from "../src/manifest.js";
 import { handleAgentSessionEvent } from "../src/intake.js";
 import { COMPANIES_KEY } from "../src/reconcile.js";
-import { handleLinearWebhook, organizationKey, runReconcile, tokenSources } from "../src/worker.js";
+import { handleLinearWebhook, organizationKey, runReconcile, tokenSources, webhookSecrets } from "../src/worker.js";
 import { companyId, config, created, fakeLinear } from "./fakes.js";
 
 const webhookSecret = "whsec_test";
@@ -45,6 +45,7 @@ describe("secret resolution names the company", () => {
     harness = createTestHarness({ manifest, config: config("observe") as unknown as Record<string, unknown> });
     calls = [];
     tokenSources.clear();
+    webhookSecrets.clear();
     strictSecrets(harness.ctx, calls);
     await harness.ctx.state.set(organizationKey("org-1"), companyId);
     await harness.ctx.state.set(COMPANIES_KEY, [companyId]);
