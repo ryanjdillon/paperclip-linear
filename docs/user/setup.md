@@ -17,6 +17,12 @@ Create an OAuth application (Linear → Settings → API → OAuth applications)
 Keep the client id, client secret, and webhook signing secret in Paperclip's
 secret store.
 
+The plugin keeps the webhook signing secret in memory for up to 5 minutes.
+If you rotate the secret behind the same secret reference, the old secret
+stays valid until that time ends. After a leak, make the change take effect
+at once: save the plugin configuration again, or restart Paperclip. Either
+step clears the cached secret.
+
 ## Paperclip
 
 Run the image `ghcr.io/ryanjdillon/paperclip-linear`, pinned by digest. It is
