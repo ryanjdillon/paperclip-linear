@@ -1,6 +1,6 @@
 import { definePlugin, runWorker, type PluginContext, type PluginWebhookInput } from "@paperclipai/plugin-sdk";
 import { parseConfig, type LinearConfig } from "./config.js";
-import { handleAgentSessionEvent, type AgentSessionPayload } from "./intake.js";
+import { HANDLED_SESSION_ACTIONS, handleAgentSessionEvent, type AgentSessionPayload } from "./intake.js";
 import { AppTokenSource, LinearApi, type Fetch } from "./linear/api.js";
 import { COMPANIES_KEY, RECONCILE_JOB, reconcileCompany } from "./reconcile.js";
 import { handleStatusEvent, STATUS_EVENTS } from "./status.js";
@@ -14,6 +14,7 @@ export function organizationKey(organizationId: string) {
 /** What happened to one webhook delivery; returned for tests and logged. */
 export type WebhookOutcome =
   | "ignored_endpoint"
+  | "ignored_type"
   | "unknown_organization"
   | "not_configured"
   | "rejected"
@@ -44,8 +45,21 @@ function hostFetch(context: PluginContext): Fetch {
 }
 
 /**
- * Handle one Linear delivery. Webhooks carry no Paperclip company, so the
- * Linear workspace id in the payload selects the company. Never throws for a
+ * True for the deliveries the plugin acts on. The type and action are read
+ * before the signature check. A forged value can only make the plugin skip a
+ * delivery, and a skipped delivery has no effect.
+ */
+export function isHandledDelivery(body: unknown): boolean {
+  const { type, action } = (body ?? {}) as { type?: unknown; action?: unknown };
+  return type === "AgentSessionEvent" && typeof action === "string" && HANDLED_SESSION_ACTIONS.includes(action);
+}
+
+/**
+ * Handle one Linear delivery. Deliveries the plugin does not act on get an
+ * answer at once. The host limits secret resolves to 30 a minute for each
+ * company, and a burst of issue or comment events used up that limit.
+ * Webhooks carry no Paperclip company, so the Linear workspace id in the
+ * payload selects the company. Never throws for a
  * bad delivery: a 502 would make Linear retry something that will never pass.
  * A host failure before the delivery id is recorded (for example the host's
  * secret-resolve rate limit) does throw, so Linear retries it.
@@ -57,6 +71,7 @@ export async function handleLinearWebhook(
   fetch: Fetch = hostFetch(context),
 ): Promise<WebhookOutcome> {
   if (input.endpointKey !== "linear") return "ignored_endpoint";
+  if (!isHandledDelivery(input.parsedBody)) return "ignored_type";
   const organizationId = (input.parsedBody as { organizationId?: unknown } | undefined)?.organizationId;
   const companyId =
     typeof organizationId === "string" ? await context.state.get(organizationKey(organizationId)) : null;
@@ -77,17 +92,15 @@ export async function handleLinearWebhook(
   }
   if (!(await firstDelivery(context.state, check.deliveryId, now))) return "duplicate";
   context.logger.info("Accepted a Linear delivery", { companyId, deliveryId: check.deliveryId, mode: parsed.config.mode });
-  const body = input.parsedBody as AgentSessionPayload | undefined;
-  if (body?.type === "AgentSessionEvent") {
-    try {
-      const linear = await linearFor(context, companyId, parsed.config, fetch);
-      const outcome = await handleAgentSessionEvent({ ctx: context, linear, companyId, config: parsed.config }, body);
-      context.logger.info("Handled a Linear agent session event", { companyId, outcome });
-    } catch (error) {
-      // The delivery id is already recorded, so a Linear retry would be dropped;
-      // the reconcile job (DIL-868) picks up sessions left unhandled.
-      context.logger.error("Failed to handle a Linear agent session event", { companyId, error: String(error) });
-    }
+  try {
+    const linear = await linearFor(context, companyId, parsed.config, fetch);
+    const body = input.parsedBody as AgentSessionPayload;
+    const outcome = await handleAgentSessionEvent({ ctx: context, linear, companyId, config: parsed.config }, body);
+    context.logger.info("Handled a Linear agent session event", { companyId, outcome });
+  } catch (error) {
+    // The delivery id is already recorded, so a Linear retry would be dropped;
+    // the reconcile job (DIL-868) picks up sessions left unhandled.
+    context.logger.error("Failed to handle a Linear agent session event", { companyId, error: String(error) });
   }
   return "accepted";
 }
