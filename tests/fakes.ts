@@ -82,7 +82,13 @@ export function fakeLinear(
       variables: { id?: string; issue?: string; state?: string; input?: { content?: { type: string; body: string }; addedExternalUrls?: typeof urls; stateId?: string } };
     };
     const ok = (data: unknown) => ({ status: 200, ok: true, json: async () => ({ data }) });
-    if (query.includes("AppAgentSessions")) return ok({ viewer: { id: appUserId }, agentSessions: { nodes: sessions } });
+    if (query.includes("AppAgentSessions")) {
+      // The fields recovery reads, so a renamed field fails a test.
+      for (const field of ["viewer { id }", "orderBy: createdAt", "createdAt", "status", "dismissedAt", "appUser { id }", "creator { id }", "state { type }", "delegate { id }"]) {
+        expect(query).toContain(field);
+      }
+      return ok({ viewer: { id: appUserId }, agentSessions: { nodes: sessions } });
+    }
     if (query.includes("agentActivityCreate")) {
       activities.push(variables.input!.content!);
       return ok({ agentActivityCreate: { success: true } });

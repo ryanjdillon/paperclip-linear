@@ -1,7 +1,7 @@
 import type { PluginContext } from "@paperclipai/plugin-sdk";
 import { organizationKey, type LinearConfig } from "./config.js";
 import { handleAgentSessionEvent, ORIGIN_KIND, sessionKey, taskKey, wakeLead, type SessionLink } from "./intake.js";
-import type { LinearApi } from "./linear/api.js";
+import type { AppAgentSession, LinearApi } from "./linear/api.js";
 import { commentOutbound, doneOutbound, moveIssue, outboundKey, readActivity, recordActivity } from "./status.js";
 
 export const RECONCILE_JOB = "reconcile";
@@ -179,7 +179,11 @@ async function recoverSessions(
   tasks: Array<{ status: string; originId?: string | null }>,
   report: ReconcileReport,
 ): Promise<void> {
-  if ((await ctx.state.get(organizationKey(config.linearOrganizationId))) !== companyId) return;
+  const owner = await ctx.state.get(organizationKey(config.linearOrganizationId));
+  if (owner !== companyId) {
+    ctx.logger.debug("Another company owns the Linear workspace; not recovering its sessions", { companyId, owner });
+    return;
+  }
   let sessions;
   try {
     sessions = await linear.appAgentSessions(RECOVER_PAGE);
@@ -188,16 +192,24 @@ async function recoverSessions(
     ctx.logger.error("Reconcile could not list Linear agent sessions", { companyId, error: String(error) });
     return;
   }
+  // An issue is taken when it has an open task, or a session that waits for
+  // the owner to name a lead: a second lost session must not ask again.
   const openIssues = new Set(
     tasks.filter((t) => t.status !== "done" && t.status !== "cancelled" && t.originId).map((t) => t.originId!),
   );
+  const unlinked: AppAgentSession[] = [];
   for (const session of sessions) {
-    if (report.recovered >= RECOVER_LIMIT) break;
     const ageMs = now - session.createdAt;
     if (!(ageMs >= RECOVER_GRACE_MS && ageMs <= RECOVER_WINDOW_MS)) continue;
+    const link = (await ctx.state.get(sessionKey(session.id))) as SessionLink | null;
+    if (link?.status === "awaiting_route") openIssues.add(link.linearIssueId);
+    if (!link) unlinked.push(session);
+  }
+  for (const session of unlinked) {
+    if (report.recovered >= RECOVER_LIMIT || report.observed >= RECOVER_LIMIT) break;
+    const ageMs = now - session.createdAt;
     if (session.dismissed || ENDED_SESSION.has(session.status) || !session.issueId) continue;
     if (!session.delegatedToApp || CLOSED_ISSUE.has(session.issueStateType ?? "")) continue;
-    if (await ctx.state.get(sessionKey(session.id))) continue;
     if (openIssues.has(session.issueId)) {
       report.superseded++;
       ctx.logger.debug("A newer delegation of the issue was routed; not recovering its lost session", { companyId, sessionId: session.id });
@@ -205,13 +217,13 @@ async function recoverSessions(
     }
     try {
       const intake = await handleAgentSessionEvent(
-        { ctx, linear, companyId, config },
+        { ctx, linear, companyId, config, recovery: true },
         { action: "created", agentSession: { id: session.id, issueId: session.issueId, creatorId: session.creatorId ?? undefined } },
       );
       if (intake === "duplicate_session") continue;
       const outcome = intake === "observed" ? "observed" : "recovered";
       report[outcome]++;
-      if (outcome === "recovered") openIssues.add(session.issueId);
+      if (intake === "routed" || intake === "asked") openIssues.add(session.issueId);
       ctx.logger.info("Recovered a Linear agent session", { companyId, sessionId: session.id, ageMs, outcome, intake });
     } catch (error) {
       report.errors++;

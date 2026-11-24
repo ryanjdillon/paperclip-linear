@@ -2,7 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import type { LinearConfig } from "./config.js";
 import type { LinearApi } from "./linear/api.js";
 import { route } from "./routing.js";
-import { recordActivity } from "./status.js";
+import { readActivity, recordActivity } from "./status.js";
 
 export const ORIGIN_KIND = "plugin:ryanjdillon.paperclip-linear" as const;
 
@@ -58,6 +58,11 @@ export interface IntakeDeps {
   linear: LinearApi;
   companyId: string;
   config: LinearConfig;
+  /**
+   * Set by reconcile. A recovery whose first attempt posted the
+   * acknowledgement and then failed does not post it again.
+   */
+  recovery?: boolean;
 }
 
 /**
@@ -116,7 +121,7 @@ async function routeSession(
   const { ctx, linear, companyId, config } = deps;
   const observe = config.mode === "observe";
   // Linear marks a session unresponsive without an activity within 10 seconds.
-  if (!observe) {
+  if (!observe && !(deps.recovery && (await readActivity(ctx, sessionId)) !== null)) {
     await linear.postActivity(sessionId, "thought", "Received. Routing to a Paperclip agent.", true);
     await recordActivity(ctx, sessionId, Date.now(), "thought");
   }
