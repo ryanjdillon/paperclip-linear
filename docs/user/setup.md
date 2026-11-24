@@ -31,6 +31,12 @@ paperclipai plugin install /opt/paperclip-plugins/paperclip-linear
 (Unverified: whether the CLI must run inside the container or can point at
 the server from outside; the path must be readable by the server.)
 
+The image also holds the SSH sandbox provider at
+`/opt/paperclip-plugins/sandbox-ssh` (source:
+[`paperclip-image/sandbox-ssh`](https://github.com/ryanjdillon/paperclip-image/tree/main/sandbox-ssh)).
+It is not part of this plugin. Install it from that path in the same way
+only if you use sandbox environments over SSH.
+
 Then set its configuration for the company:
 
 | Field | Meaning |

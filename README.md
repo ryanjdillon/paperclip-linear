@@ -28,7 +28,8 @@ pnpm dev        # rebuild dist/ on change
 ```
 
 Tagged releases (`v*`) publish `ghcr.io/ryanjdillon/paperclip-linear`: the
-official Paperclip image with the plugin baked in (see
+official Paperclip image with the plugin baked in, and also the SSH sandbox
+provider from `ryanjdillon/paperclip-image` (see
 [setup](docs/user/setup.md)). Pull requests that touch the image only build it.
 
 To try it locally, run the published Paperclip release the SDK is pinned to
