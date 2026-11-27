@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR cancels the PR's older run. A push to main gets its own
+# group (the commit), so a main run is never cancelled or queued.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   nix:
     uses: ryanjdillon/workflows/.github/workflows/nix-check.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
