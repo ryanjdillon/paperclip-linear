@@ -21,4 +21,4 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ryanjdillon/workflows/check-instructions@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+      - uses: ryanjdillon/workflows/check-instructions@5a8a9389d9ff1826df8b4ab8d8a0cce3936693a4 # v1.2.0
