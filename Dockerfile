@@ -25,4 +25,4 @@ COPY --from=build /src/dist /opt/paperclip-plugins/paperclip-linear/dist
 # The SSH sandbox provider (github.com/ryanjdillon/paperclip-image, sandbox-ssh/):
 # the environment driver that runs sandbox agents, such as gemini_local over
 # ACP, on an SSH server. Its image holds only /package.json and /dist.
-COPY --from=ghcr.io/ryanjdillon/paperclip-sandbox-ssh@sha256:e08b88c85c4ff3d5fb940068df6f87ea7c502e2813c8767e628da9d33f628d64 / /opt/paperclip-plugins/sandbox-ssh/
+COPY --from=ghcr.io/ryanjdillon/paperclip-sandbox-ssh@sha256:6e82459d49a6b6e7c19b05d97393a78816d838eb301196477b9b22c9ba87e811 / /opt/paperclip-plugins/sandbox-ssh/
